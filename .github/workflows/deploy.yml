@@ -34,7 +34,6 @@ jobs:
         run: npm run build
 
       # 6. 通过 SCP 上传整个项目目录到服务器
-      #    注意：Next.js 不是静态网站，需要上传源码 + .next + node_modules
       - name: 🚀 Deploy to server (SCP)
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -45,7 +44,7 @@ jobs:
           target: "/var/www/ai-profile-lab"
           rm: false
 
-      # 7. 在服务器上执行：安装依赖、初始化数据库、重启服务
+      # 7. 在服务器上执行：写入环境变量、安装依赖、初始化数据库、重启服务
       - name: 🔄 Setup & Restart on server
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -54,6 +53,24 @@ jobs:
           password: ${{ secrets.SERVER_PASSWORD }}
           script: |
             cd /var/www/ai-profile-lab
+
+            # ── 写入环境变量（从 GitHub Secrets 注入）──
+            cat > .env.local << 'ENVEOF'
+            # ── 火山方舟 (Volcano Ark) 配置 ──
+            VOLC_API_KEY=${{ secrets.VOLC_API_KEY }}
+            VOLC_ENDPOINT_LLM=${{ secrets.VOLC_ENDPOINT_LLM }}
+            VOLC_ENDPOINT_IMAGE=${{ secrets.VOLC_ENDPOINT_IMAGE }}
+            VOLC_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+
+            # ── 数据库 ──
+            DATABASE_URL="file:./dev.db"
+
+            # ── 应用配置 ──
+            NEXT_PUBLIC_APP_NAME="实验同学录"
+            NEXT_PUBLIC_APP_SUBTITLE="2006 届校友的数字纪念册"
+            ENVEOF
+
+            chmod 600 .env.local
 
             # 安装依赖（服务器端）
             npm ci --omit=dev 2>/dev/null || npm install --omit=dev
@@ -67,12 +84,28 @@ jobs:
             # 种子数据（仅首次）
             npx prisma db seed 2>/dev/null || true
 
-            # 用 PM2 启动/重启 Next.js 服务
-            if pm2 list | grep -q "ai-profile-lab"; then
-              pm2 restart ai-profile-lab
-            else
-              pm2 start npm --name "ai-profile-lab" -- start
-            fi
+            # ── 用 ecosystem.config.js 启动 PM2（正确加载 .env.local）──
+            cat > ecosystem.config.js << 'PM2EOF'
+            module.exports = {
+              apps: [{
+                name: 'ai-profile-lab',
+                script: 'npm',
+                args: 'start',
+                cwd: '/var/www/ai-profile-lab',
+                env: {
+                  NODE_ENV: 'production',
+                },
+                error_file: '/root/.pm2/logs/ai-profile-lab-error.log',
+                out_file: '/root/.pm2/logs/ai-profile-lab-out.log',
+                log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+              }],
+            };
+            PM2EOF
+
+            # 先加载环境变量，再启动 PM2
+            export $(cat .env.local | grep -v '^#' | xargs)
+            pm2 delete ai-profile-lab 2>/dev/null || true
+            pm2 start ecosystem.config.js
             pm2 save
 
             # 重载 Nginx
