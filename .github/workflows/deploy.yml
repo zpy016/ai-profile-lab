@@ -1,0 +1,79 @@
+name: 🚀 Deploy AI Profile LAB
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 检出代码
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      # 2. 设置 Node.js 22
+      - name: ⚙️ Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # 3. 安装依赖
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      # 4. 生成 Prisma Client
+      - name: 🔧 Generate Prisma Client
+        run: npx prisma generate
+
+      # 5. 构建 Next.js 项目
+      - name: 🔨 Build Next.js
+        run: npm run build
+
+      # 6. 通过 SCP 上传整个项目目录到服务器
+      #    注意：Next.js 不是静态网站，需要上传源码 + .next + node_modules
+      - name: 🚀 Deploy to server (SCP)
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          source: "."
+          target: "/var/www/ai-profile-lab"
+          rm: false
+
+      # 7. 在服务器上执行：安装依赖、初始化数据库、重启服务
+      - name: 🔄 Setup & Restart on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          script: |
+            cd /var/www/ai-profile-lab
+
+            # 安装依赖（服务器端）
+            npm ci --omit=dev 2>/dev/null || npm install --omit=dev
+
+            # 生成 Prisma Client
+            npx prisma generate
+
+            # 同步数据库（SQLite 首次自动创建）
+            npx prisma db push --accept-data-loss 2>/dev/null || true
+
+            # 种子数据（仅首次）
+            npx prisma db seed 2>/dev/null || true
+
+            # 用 PM2 启动/重启 Next.js 服务
+            if pm2 list | grep -q "ai-profile-lab"; then
+              pm2 restart ai-profile-lab
+            else
+              pm2 start npm --name "ai-profile-lab" -- start
+            fi
+            pm2 save
+
+            # 重载 Nginx
+            nginx -t && systemctl reload nginx

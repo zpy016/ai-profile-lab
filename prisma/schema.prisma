@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  className String   @default("")
+  avatar    String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  profile   Profile?
+}
+
+model Profile {
+  id                   String   @id @default(uuid())
+  userId               String   @unique
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userConfirmedIntro   String   @default("")
+  aiDeltaIntro         String   @default("")
+  introSource          String   @default("ai") // "ai" | "user_edited"
+  status               String   @default("empty") // "empty" | "draft" | "active"
+  publishedAt          DateTime?
+  hasUnconfirmedDelta  Boolean  @default(false)
+  creationMethod       String?  // "quick" | "interview" | "hybrid"
+  imageUrl             String   @default("")
+  imageHistory         String   @default("[]") // JSON array of previous image URLs
+  imageOutdated        Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  contentBlocks        ContentBlock[]
+  profileTags          ProfileTag[]
+}
+
+model ContentBlock {
+  id         String   @id @default(uuid())
+  profileId  String
+  profile    Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  category   String   // "self_intro" | "background" | "offer" | "need" | "custom"
+  title      String   @default("")
+  content    String
+  visibility String   @default("public") // "public" | "search_only" | "private"
+  source     String   @default("user") // "user" | "ai_extracted" | "ai_interview"
+  order      Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model ProfileTag {
+  id         String   @id @default(uuid())
+  profileId  String
+  profile    Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  tagText    String
+  tagType    String   // "belong" | "follow" | "offer" | "need"
+  source     String   @default("ai") // "ai" | "user_edited"
+  visibility String   @default("public") // "public" | "search_only" | "private"
+  isDelta    Boolean  @default(false) // AI incremental tag pending user decision
+  order      Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model AILog {
+  id               String   @id @default(uuid())
+  userId           String
+  action           String   // "extract_tags" | "generate_intro" | "generate_image" | "interview"
+  input            String
+  output           String   @default("")
+  model            String   @default("")
+  promptUsed       String   @default("")
+  duration         Int      @default(0) // in ms
+  userModified     Boolean  @default(false)
+  modification     String   @default("")
+  modificationType String?  // "substantive" | "cosmetic" | "delta_rejected" | null
+  createdAt        DateTime @default(now())
+}
+
+model PromptVersion {
+  id        String   @id @default(uuid())
+  promptKey String   // "extract_tags" | "generate_intro" | "generate_image" | "interview_guide"
+  content   String
+  version   Int      @default(1)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
