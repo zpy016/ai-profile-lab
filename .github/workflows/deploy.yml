@@ -29,8 +29,14 @@ jobs:
       - name: 🔧 Generate Prisma Client
         run: npx prisma generate
 
-      # 5. 构建 Next.js 项目
+      # 5. 构建 Next.js 项目（注入火山引擎环境变量，确保 API routes 能内联正确值）
       - name: 🔨 Build Next.js
+        env:
+          VOLC_API_KEY: ${{ secrets.VOLC_API_KEY }}
+          VOLC_ENDPOINT_LLM: ${{ secrets.VOLC_ENDPOINT_LLM }}
+          VOLC_ENDPOINT_IMAGE: ${{ secrets.VOLC_ENDPOINT_IMAGE }}
+          VOLC_BASE_URL: https://ark.cn-beijing.volces.com/api/v3
+          DATABASE_URL: "file:./dev.db"
         run: npm run build
 
       # 6. 通过 SCP 上传整个项目目录到服务器
