@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 /**
- * Mobile redirect middleware.
+ * Mobile redirect middleware + Admin auth protection.
  * POC is desktop-only (≥1024px). Mobile/tablet users are redirected to /mobile.
  *
  * Bypass methods (for local dev/debugging):
@@ -10,8 +10,38 @@ import type { NextRequest } from "next/server";
  *   2. Turn off DevTools "Device Toolbar" in Chrome (it spoofs a mobile UA)
  *   3. If your browser has a mobile User-Agent, the middleware will redirect
  */
+
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
+
+function isAdminPath(pathname: string): boolean {
+  return pathname === "/admin" || pathname.startsWith("/admin/") ||
+         pathname.startsWith("/api/admin/");
+}
+
+function checkBasicAuth(request: NextRequest): boolean {
+  const auth = request.headers.get("authorization");
+  if (!auth || !auth.startsWith("Basic ")) return false;
+  const base64 = auth.slice(6);
+  const decoded = atob(base64);
+  const [, password] = decoded.split(":");
+  return password === ADMIN_PASSWORD;
+}
+
 export function middleware(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl;
+
+  // ── Admin auth protection ──
+  if (ADMIN_PASSWORD && isAdminPath(pathname)) {
+    if (!checkBasicAuth(request)) {
+      return new NextResponse("Unauthorized", {
+        status: 401,
+        headers: {
+          "WWW-Authenticate": 'Basic realm="Admin Area"',
+        },
+      });
+    }
+    return NextResponse.next();
+  }
 
   // Skip middleware for API routes, static assets, and the mobile page itself
   if (

@@ -11,13 +11,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Text is required" }, { status: 400 });
     }
 
+    if (text.length > 3000) {
+      return NextResponse.json(
+        { error: "Text too long. Maximum 3000 characters allowed." },
+        { status: 413 }
+      );
+    }
+
     // Fetch active prompt
     const prompt = await prisma.promptVersion.findFirst({
       where: { promptKey: "extract_tags", isActive: true },
       orderBy: { version: "desc" },
     });
 
-    const systemPrompt = prompt?.content || `你是一位校友档案整理员。请从以下自我介绍中提取标签...`;
+    const systemPrompt = prompt?.content || `你是一位校友档案整理员。请从以下自我介绍中提取标签和内容块。
+
+标签分为四类：属于（身份归属）、提供（能给予的）、需要（需要的）、关注（兴趣爱好）。每个标签不超过8个字。
+
+输出严格 JSON 格式，包含以下字段：
+- tags: 所有标签数组（每个有 text 和 type 字段）
+- content_blocks: 内容块数组（每个有 category 和 content 字段）
+- intro: 200字以内的第三人称简介
+- delta_tags: 如果这是「增量更新」（用户在已有信息基础上补充了新内容），仅输出新增的标签；否则为空数组 []
+- delta_intro: 如果这是增量更新，仅输出简介中新增/变化的段落；否则为空字符串 ""
+
+判断增量更新的方法：如果输入内容明显是在已有档案基础上补充的新信息，则提取 delta；如果是完整的自我介绍，则 delta 为空。
+
+请确保 JSON 格式正确，可以被直接解析。`;
 
     // If Volcano is configured, use real AI
     if (isVolcanoConfigured()) {

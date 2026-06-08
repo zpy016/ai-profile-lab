@@ -99,6 +99,10 @@ export default function QuickCreatePage() {
       setTimeout(() => setCabinState("idle"), 400);
       return;
     }
+    if (inputText.length > 2000) {
+      setErrorMsg("内容过长，请精简至 2000 字以内");
+      return;
+    }
 
     setCabinState("parsing");
     setIsGenerating(true);
@@ -338,8 +342,14 @@ export default function QuickCreatePage() {
                   disabled={isGenerating}
                 />
               </div>
-              <div className="inline-flex items-center gap-1 px-2.5 py-1 mt-2 text-xs text-text-secondary bg-elevated rounded-sm cursor-default select-none">
-                <span>🎤</span> 提示：可以使用手机键盘的语音输入功能
+              <div className="flex items-center justify-between mt-2">
+                <div className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-text-secondary bg-elevated rounded-sm cursor-default select-none">
+                  <span>🎤</span> 提示：可以使用手机键盘的语音输入功能
+                </div>
+                <div className={`text-xs ${inputText.length > 2000 ? "text-error font-semibold" : "text-text-placeholder"}`}>
+                  {inputText.length} / 2000 字
+                  {inputText.length > 2000 && <span className="ml-1">请精简内容</span>}
+                </div>
               </div>
             </div>
 
@@ -502,8 +512,8 @@ export default function QuickCreatePage() {
       {step === "quick" && (
         <div className="submit-bar max-w-[860px] mx-auto px-8">
           <button className="btn-secondary" onClick={handleReset}>清空重来</button>
-          <button className="btn-primary" onClick={handleGenerate} disabled={isGenerating}>
-            {isGenerating ? "AI 正在分析..." : "生成我的主页"}
+          <button className="btn-primary" onClick={handleGenerate} disabled={isGenerating || inputText.length > 2000}>
+            {isGenerating ? "AI 正在分析..." : inputText.length > 2000 ? "内容过长" : "生成我的主页"}
           </button>
         </div>
       )}
