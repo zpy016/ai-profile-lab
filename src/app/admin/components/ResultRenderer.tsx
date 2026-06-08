@@ -31,6 +31,8 @@ interface Props {
   onRejectDeltaIntro?: () => void;
   onConfirmDeltaTag?: (tag: SandboxTag) => void;
   onRejectDeltaTag?: (tag: SandboxTag) => void;
+  onConfirmDeltaBlock?: (block: SandboxBlock) => void;
+  onRejectDeltaBlock?: (block: SandboxBlock) => void;
 }
 
 const CAT_LABELS: Record<string, string> = {
@@ -65,6 +67,8 @@ export default function ResultRenderer({
   onRejectDeltaIntro,
   onConfirmDeltaTag,
   onRejectDeltaTag,
+  onConfirmDeltaBlock,
+  onRejectDeltaBlock,
 }: Props) {
   const [editingIntro, setEditingIntro] = useState(false);
   const [introDraft, setIntroDraft] = useState("");
@@ -187,29 +191,42 @@ export default function ResultRenderer({
       {/* Content Blocks */}
       {data.content_blocks.length > 0 && (
         <div className="flex flex-col gap-2">
-          {data.content_blocks.map((block, i) => (
-            <div key={`${block.category}-${i}`} className="relative bg-surface border border-border rounded-md py-2.5 px-3 pl-4 shadow-sm group">
-              <div
-                className="absolute left-1 top-2.5 bottom-2.5 w-0.5 rounded-[1px]"
-                style={{ background: CAT_COLORS[block.category] || "#7A8B99" }}
-              />
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] font-semibold text-text-primary">{CAT_LABELS[block.category] || block.label || block.category}</span>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[9px] font-medium text-accent rounded-[2px] px-1 py-px" style={{ background: "rgba(196,154,108,0.12)" }}>AI</span>
-                  {onChange && (
-                    <button
-                      className="text-[9px] text-text-placeholder hover:text-accent opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={() => handleRemoveBlock(i)}
-                    >
-                      ✕
-                    </button>
-                  )}
+          {data.content_blocks.map((block, i) => {
+            const isDelta = block.delta;
+            return (
+              <div key={`${block.category}-${i}`} className={`relative bg-surface border rounded-md py-2.5 px-3 pl-4 shadow-sm group ${isDelta ? "border-accent border-dashed" : "border-border"}`}>
+                <div
+                  className="absolute left-1 top-2.5 bottom-2.5 w-0.5 rounded-[1px]"
+                  style={{ background: CAT_COLORS[block.category] || "#7A8B99" }}
+                />
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[11px] font-semibold text-text-primary">{CAT_LABELS[block.category] || block.label || block.category}</span>
+                  <div className="flex items-center gap-1.5">
+                    {isDelta && showDeltaActions && (
+                      <>
+                        {onConfirmDeltaBlock && (
+                          <button className="text-[9px] text-accent hover:text-brand-dark font-medium" onClick={() => onConfirmDeltaBlock(block)}>✓ 保留</button>
+                        )}
+                        {onRejectDeltaBlock && (
+                          <button className="text-[9px] text-text-placeholder hover:text-accent" onClick={() => onRejectDeltaBlock(block)}>✕ 拒绝</button>
+                        )}
+                      </>
+                    )}
+                    <span className="text-[9px] font-medium text-accent rounded-[2px] px-1 py-px" style={{ background: "rgba(196,154,108,0.12)" }}>AI</span>
+                    {onChange && (
+                      <button
+                        className="text-[9px] text-text-placeholder hover:text-accent opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={() => handleRemoveBlock(i)}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
                 </div>
+                <p className="text-xs leading-relaxed text-text-primary">{block.text}</p>
               </div>
-              <p className="text-xs leading-relaxed text-text-primary">{block.text}</p>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

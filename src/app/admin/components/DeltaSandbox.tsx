@@ -18,7 +18,7 @@ interface ProfileData {
   userConfirmedIntro: string;
   aiDeltaIntro: string;
   tags: Array<{ id: string; tagText: string; tagType: string; isDelta: boolean }>;
-  blocks: Array<{ id: string; category: string; label: string; text: string }>;
+  blocks: Array<{ id: string; category: string; label: string; text: string; content?: string }>;
 }
 
 interface Props {
@@ -75,8 +75,8 @@ export default function DeltaSandbox({ showToast }: Props) {
 
   const currentBlocks: SandboxBlock[] = profile?.blocks.map((b) => ({
     category: b.category,
-    label: b.label,
-    text: b.text,
+    label: b.label || b.category || "内容",
+    text: b.content || b.text || "",
   })) || [];
 
   const handleGenerateDelta = async () => {
@@ -124,6 +124,7 @@ export default function DeltaSandbox({ showToast }: Props) {
         ],
       };
       setDeltaResult(normalized);
+      setDeltaInput("");
       showToast("增量生成完成");
     } catch {
       showToast("网络错误");
@@ -149,12 +150,19 @@ export default function DeltaSandbox({ showToast }: Props) {
   };
 
   const handleConfirmDeltaTag = (tag: SandboxTag) => {
-    if (!deltaResult) return;
+    if (!deltaResult || !profile) return;
+    // 1. Remove from deltaResult
     setDeltaResult({
       ...deltaResult,
-      tags: deltaResult.tags.map((t) =>
-        t.name === tag.name ? { ...t, type: t.type === "delta" ? "belong" : t.type, delta: false } : t
-      ),
+      tags: deltaResult.tags.filter((t) => t.name !== tag.name),
+    });
+    // 2. Add to profile
+    setProfile({
+      ...profile,
+      tags: [
+        ...profile.tags,
+        { id: `tmp-${Date.now()}`, tagText: tag.name, tagType: tag.type === "delta" ? "belong" : tag.type, isDelta: false },
+      ],
     });
     showToast(`标签「${tag.name}」已确认加入档案`);
   };
@@ -166,6 +174,68 @@ export default function DeltaSandbox({ showToast }: Props) {
       tags: deltaResult.tags.filter((t) => t.name !== tag.name),
     });
     showToast(`标签「${tag.name}」已拒绝`);
+  };
+
+  const handleConfirmDeltaBlock = (block: SandboxBlock) => {
+    if (!deltaResult || !profile) return;
+    setDeltaResult({
+      ...deltaResult,
+      content_blocks: deltaResult.content_blocks.filter((b) => b.text !== block.text),
+    });
+    setProfile({
+      ...profile,
+      blocks: [
+        ...profile.blocks,
+        { id: `tmp-${Date.now()}`, category: block.category, label: block.label, text: block.text },
+      ],
+    });
+    showToast("内容块已确认加入档案");
+  };
+
+  const handleRejectDeltaBlock = (block: SandboxBlock) => {
+    if (!deltaResult) return;
+    setDeltaResult({
+      ...deltaResult,
+      content_blocks: deltaResult.content_blocks.filter((b) => b.text !== block.text),
+    });
+    showToast("内容块已拒绝");
+  };
+
+  const handleConfirmAllDeltas = () => {
+    if (!deltaResult || !profile) return;
+    // Merge delta_intro
+    const mergedIntro = deltaResult.delta_intro
+      ? profile.userConfirmedIntro
+        ? profile.userConfirmedIntro + " " + deltaResult.delta_intro
+        : deltaResult.delta_intro
+      : profile.userConfirmedIntro;
+    // Merge delta tags
+    const confirmedTags = deltaResult.tags
+      .filter((t) => t.delta)
+      .map((t) => ({
+        id: `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        tagText: t.name,
+        tagType: t.type === "delta" ? "belong" : t.type,
+        isDelta: false,
+      }));
+    // Merge delta blocks
+    const confirmedBlocks = deltaResult.content_blocks
+      .filter((b) => b.delta)
+      .map((b) => ({
+        id: `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        category: b.category,
+        label: b.label,
+        text: b.text,
+      }));
+    setProfile({
+      ...profile,
+      userConfirmedIntro: mergedIntro,
+      tags: [...profile.tags, ...confirmedTags],
+      blocks: [...profile.blocks, ...confirmedBlocks],
+    });
+    // Keep non-delta content in deltaResult (should be empty after merge)
+    setDeltaResult(null);
+    showToast("全部增量已合并到档案");
   };
 
   return (
@@ -251,7 +321,15 @@ export default function DeltaSandbox({ showToast }: Props) {
             <div className="px-5 py-3">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[13px] font-medium text-text-primary">增量建议</span>
-                <span className="text-[10px] text-text-placeholder">可确认或拒绝</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="text-[10px] text-accent font-medium hover:text-brand-dark"
+                    onClick={handleConfirmAllDeltas}
+                  >
+                    全部确认
+                  </button>
+                  <span className="text-[10px] text-text-placeholder">可确认或拒绝</span>
+                </div>
               </div>
               <ResultRenderer
                 data={deltaResult}
@@ -261,6 +339,8 @@ export default function DeltaSandbox({ showToast }: Props) {
                 onRejectDeltaIntro={handleRejectDeltaIntro}
                 onConfirmDeltaTag={handleConfirmDeltaTag}
                 onRejectDeltaTag={handleRejectDeltaTag}
+                onConfirmDeltaBlock={handleConfirmDeltaBlock}
+                onRejectDeltaBlock={handleRejectDeltaBlock}
               />
             </div>
           )}

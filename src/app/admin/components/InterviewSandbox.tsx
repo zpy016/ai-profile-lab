@@ -60,8 +60,18 @@ export default function InterviewSandbox({ showToast }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: allMessages, userId: USER_ID }),
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "unknown");
+        console.error("Analyze API error:", res.status, errText);
+        showToast(`分析失败 (${res.status})，请检查控制台`);
+        return;
+      }
       const data = await res.json();
+      if (data.error) {
+        console.error("Analyze API returned error:", data.error);
+        showToast(`分析失败: ${data.error}`);
+        return;
+      }
       if (data.tags) {
         setPreviewTags(
           data.tags.map((t: any) => ({
@@ -70,9 +80,11 @@ export default function InterviewSandbox({ showToast }: Props) {
           }))
         );
       }
-      if (data.blocks) {
+      // API returns `content_blocks`, not `blocks`
+      const blocks = data.content_blocks || data.blocks;
+      if (blocks) {
         setPreviewBlocks(
-          data.blocks.map((b: any) => ({
+          blocks.map((b: any) => ({
             category: b.cat || b.category || "custom",
             label: b.label || CATEGORY_LABELS[b.cat || b.category] || "内容",
             text: b.text || b.content || "",
@@ -80,11 +92,19 @@ export default function InterviewSandbox({ showToast }: Props) {
         );
       }
       if (data.intro) setPreviewIntro(data.intro);
-      if (data.dimensionsCovered !== undefined) {
-        setDimensionsCovered(data.dimensionsCovered);
+      if (data.dimensions_covered?.length > 0) {
+        setDimensionsCovered(data.dimensions_covered.length);
       }
-    } catch {
-      // silent fail for preview
+      // Log success for debugging
+      console.log("Analyze success:", {
+        tags: data.tags?.length,
+        blocks: blocks?.length,
+        intro: !!data.intro,
+        dimensions: data.dimensions_covered?.length,
+      });
+    } catch (err) {
+      console.error("Analyze conversation failed:", err);
+      showToast("对话分析失败，请检查网络连接");
     }
   };
 
@@ -116,35 +136,39 @@ export default function InterviewSandbox({ showToast }: Props) {
         const aiMsgId = (Date.now() + 1).toString();
         setMessages((prev) => [...prev, { id: aiMsgId, type: "ai", content: "", category: aiCategory }]);
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n");
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              const data = line.slice(6);
-              if (data === "[DONE]") continue;
-              try {
-                const parsed = JSON.parse(data);
-                const content = parsed.choices?.[0]?.delta?.content || "";
-                if (content) {
-                  aiContent += content;
-                  setMessages((prev) =>
-                    prev.map((m) => (m.id === aiMsgId ? { ...m, content: aiContent } : m))
-                  );
-                }
-              } catch {
-                // non-JSON data, treat as plain text
-                if (data && data !== "[DONE]") {
-                  aiContent += data;
-                  setMessages((prev) =>
-                    prev.map((m) => (m.id === aiMsgId ? { ...m, content: aiContent } : m))
-                  );
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split("\n");
+            for (const line of lines) {
+              if (line.startsWith("data: ")) {
+                const data = line.slice(6);
+                if (data === "[DONE]") continue;
+                try {
+                  const parsed = JSON.parse(data);
+                  const content = parsed.choices?.[0]?.delta?.content || "";
+                  if (content) {
+                    aiContent += content;
+                    setMessages((prev) =>
+                      prev.map((m) => (m.id === aiMsgId ? { ...m, content: aiContent } : m))
+                    );
+                  }
+                } catch {
+                  // non-JSON data, treat as plain text
+                  if (data && data !== "[DONE]") {
+                    aiContent += data;
+                    setMessages((prev) =>
+                      prev.map((m) => (m.id === aiMsgId ? { ...m, content: aiContent } : m))
+                    );
+                  }
                 }
               }
             }
           }
+        } finally {
+          reader.releaseLock();
         }
       }
 
@@ -159,7 +183,11 @@ export default function InterviewSandbox({ showToast }: Props) {
       showToast("AI 响应失败，已切换到模拟模式");
       // Mock fallback
       const mockReply = "了解了，谢谢你的分享！能再多聊聊你最近在关注的事情吗？";
-      setMessages((prev) => [...prev, { id: (Date.now() + 1).toString(), type: "ai", content: mockReply }]);
+      const mockMsgId = (Date.now() + 1).toString();
+      setMessages((prev) => [...prev, { id: mockMsgId, type: "ai", content: mockReply }]);
+      // Trigger analysis even in mock mode so preview & dimensions work
+      const finalMessages: Message[] = [...updatedMessages, { id: mockMsgId, type: "ai", content: mockReply }];
+      await analyzeConversation(finalMessages);
     } finally {
       setIsTyping(false);
     }
