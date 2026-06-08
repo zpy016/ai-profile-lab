@@ -36,6 +36,9 @@ jobs:
           VOLC_ENDPOINT_LLM: ${{ secrets.VOLC_ENDPOINT_LLM }}
           VOLC_ENDPOINT_IMAGE: ${{ secrets.VOLC_ENDPOINT_IMAGE }}
           VOLC_BASE_URL: https://ark.cn-beijing.volces.com/api/v3
+          VOLC_ACCESSKEY: ${{ secrets.VOLC_ACCESSKEY }}
+          VOLC_SECRETKEY: ${{ secrets.VOLC_SECRETKEY }}
+          VOLC_REGION: cn-beijing
           DATABASE_URL: "file:./dev.db"
         run: npm run build
 
@@ -67,6 +70,11 @@ jobs:
             VOLC_ENDPOINT_LLM=${{ secrets.VOLC_ENDPOINT_LLM }}
             VOLC_ENDPOINT_IMAGE=${{ secrets.VOLC_ENDPOINT_IMAGE }}
             VOLC_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+
+            # ── 火山引擎视觉智能服务（图片生成）──
+            VOLC_ACCESSKEY=${{ secrets.VOLC_ACCESSKEY }}
+            VOLC_SECRETKEY=${{ secrets.VOLC_SECRETKEY }}
+            VOLC_REGION=cn-beijing
 
             # ── 数据库 ──
             DATABASE_URL="file:./dev.db"
@@ -104,6 +112,9 @@ jobs:
                   VOLC_ENDPOINT_LLM: '${{ secrets.VOLC_ENDPOINT_LLM }}',
                   VOLC_ENDPOINT_IMAGE: '${{ secrets.VOLC_ENDPOINT_IMAGE }}',
                   VOLC_BASE_URL: 'https://ark.cn-beijing.volces.com/api/v3',
+                  VOLC_ACCESSKEY: '${{ secrets.VOLC_ACCESSKEY }}',
+                  VOLC_SECRETKEY: '${{ secrets.VOLC_SECRETKEY }}',
+                  VOLC_REGION: 'cn-beijing',
                   DATABASE_URL: 'file:./dev.db',
                   NEXT_PUBLIC_APP_NAME: '实验同学录',
                   NEXT_PUBLIC_APP_SUBTITLE: '2006 届校友的数字纪念册',

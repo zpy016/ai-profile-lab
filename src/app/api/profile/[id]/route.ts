@@ -60,3 +60,50 @@ export async function GET(
     );
   }
 }
+
+/**
+ * PUT /api/profile/[id]
+ * Update profile fields (image, status, etc.)
+ */
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+
+  try {
+    const body = await request.json();
+    const profile = await prisma.profile.findUnique({
+      where: { userId: id },
+    });
+
+    if (!profile) {
+      return NextResponse.json({ error: "Profile not found" }, { status: 404 });
+    }
+
+    const updateData: Record<string, unknown> = {};
+    if (body.imageUrl !== undefined) updateData.imageUrl = body.imageUrl;
+    if (body.imageOutdated !== undefined) updateData.imageOutdated = body.imageOutdated;
+    if (body.status !== undefined) updateData.status = body.status;
+    if (body.hasUnconfirmedDelta !== undefined) updateData.hasUnconfirmedDelta = body.hasUnconfirmedDelta;
+
+    const updated = await prisma.profile.update({
+      where: { id: profile.id },
+      data: updateData,
+    });
+
+    return NextResponse.json({
+      id: updated.id,
+      status: updated.status,
+      imageUrl: updated.imageUrl,
+      imageOutdated: updated.imageOutdated,
+      hasUnconfirmedDelta: updated.hasUnconfirmedDelta,
+    });
+  } catch (error) {
+    console.error("Error updating profile:", error);
+    return NextResponse.json(
+      { error: "Failed to update profile" },
+      { status: 500 }
+    );
+  }
+}

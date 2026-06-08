@@ -49,13 +49,13 @@ echo ""
 echo "📁 4/7 创建项目目录 ..."
 mkdir -p /var/www/ai-profile-lab
 
-# ── 5. 配置 Nginx 反向代理 ──
+# ── 5. 配置 Nginx 反向代理（监听 8033 端口） ──
 echo ""
-echo "🔧 5/7 配置 Nginx ..."
+echo "🔧 5/7 配置 Nginx (端口 8033) ..."
 cat > /etc/nginx/sites-available/ai-profile-lab << 'NGINX_EOF'
 # AI Profile LAB — Nginx 反向代理
 server {
-    listen 80;
+    listen 8033;
     server_name _;
 
     # 日志
@@ -87,13 +87,14 @@ NGINX_EOF
 ln -sf /etc/nginx/sites-available/ai-profile-lab /etc/nginx/sites-enabled/ai-profile-lab
 rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
-echo "   Nginx 配置完成 ✓"
+echo "   Nginx 配置完成 ✓ (端口 8033)"
 
 # ── 6. 防火墙放行 ──
 echo ""
 echo "🔓 6/7 防火墙放行 ..."
+ufw allow 8033/tcp 2>/dev/null || true
 ufw allow 80/tcp 2>/dev/null || true
-echo "   端口 80 已放行"
+echo "   端口 8033 已放行"
 
 # ── 7. 安全组提示 ──
 echo ""
@@ -103,7 +104,7 @@ echo "   进入路径: 火山云控制台 → 云服务器 → 安全组 → 添
 echo "   ┌──────────┬──────┬──────────────┐"
 echo "   │ 协议      │ 端口  │ 来源          │"
 echo "   ├──────────┼──────┼──────────────┤"
-echo "   │ TCP       │ 80   │ 0.0.0.0/0    │"
+echo "   │ TCP       │ 8033 │ 0.0.0.0/0    │"
 echo "   │ TCP       │ 22   │ 你的IP/32     │"
 echo "   └──────────┴──────┴──────────────┘"
 
@@ -114,16 +115,17 @@ echo ""
 echo "下一步："
 echo "  1. 确保 GitHub Secrets 已配置（见下方说明）"
 echo "  2. 本地 git push → GitHub Actions 自动部署"
-echo "  3. 在服务器上创建 .env.local 文件（火山引擎密钥）"
+echo "  3. 在服务器上创建 .env.local 文件（火山方舟 API Key）"
 echo ""
 echo "服务器端 .env.local 创建命令："
 echo '  cat > /var/www/ai-profile-lab/.env.local << EOF'
-echo '  VOLC_ACCESSKEY=你的AccessKey'
-echo '  VOLC_SECRETKEY=你的SecretKey'
+echo '  VOLC_API_KEY=ark-你的API密钥'
 echo '  VOLC_ENDPOINT_LLM=ep-2024xxxx...'
 echo '  VOLC_ENDPOINT_IMAGE=ep-2024xxxx...'
-echo '  VOLC_REGION=cn-beijing'
+echo '  VOLC_BASE_URL=https://ark.cn-beijing.volces.com/api/v3'
+echo '  DATABASE_URL="file:./dev.db"'
 echo '  EOF'
+echo '  chmod 600 /var/www/ai-profile-lab/.env.local'
 echo ""
 echo "GitHub Secrets (在 GitHub 仓库 Settings → Secrets → Actions 中设置)："
 echo '  SERVER_IP       服务器公网IP'

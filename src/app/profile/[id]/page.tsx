@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useParams } from "next/navigation";
 
 // ── Types ──
@@ -13,13 +13,29 @@ interface ProfileBlock {
   visibility: "public" | "search_only";
 }
 
-// ── Mock Data ──
-const MOCK_BLOCKS: ProfileBlock[] = [
-  { id: "b1", category: "self_intro", label: "自我介绍", text: "我是一名 AI 创业者，前大厂产品负责人，2006 年从实验中学毕业。", source: "AI", visibility: "public" },
-  { id: "b2", category: "background", label: "历史背景", text: "清华计算机系毕业，15 年互联网行业经验，曾在字节跳动、美团担任产品负责人。", source: "AI", visibility: "public" },
-  { id: "b3", category: "offer", label: "能提供的", text: "AI 产品设计咨询、创业经验分享、技术团队管理经验。可以帮校友评估 AI 创业方向。", source: "AI", visibility: "public" },
-  { id: "b4", category: "need", label: "具体需求", text: "正在寻找技术合伙人（后端/算法方向），以及天使轮融资机会。", source: "AI", visibility: "search_only" },
-];
+interface ProfileTag {
+  id: string;
+  tagText: string;
+  tagType: string;
+  source: string;
+  visibility: string;
+  isDelta: boolean;
+}
+
+interface ProfileData {
+  id: string;
+  userName: string;
+  className: string;
+  userConfirmedIntro: string;
+  aiDeltaIntro: string;
+  introSource: string;
+  status: string;
+  hasUnconfirmedDelta: boolean;
+  imageUrl: string;
+  imageOutdated: boolean;
+  tags: ProfileTag[];
+  blocks: ProfileBlock[];
+}
 
 const CAT_NAMES: Record<string, string> = {
   self_intro: "自我介绍",
@@ -29,17 +45,25 @@ const CAT_NAMES: Record<string, string> = {
   custom: "自定义",
 };
 
-export default function ProfilePage() {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const params = useParams();
+const TAG_CLASS_MAP: Record<string, string> = {
+  belong: "tag--belong",
+  offer: "tag--offer",
+  need: "tag--need",
+  follow: "tag--follow",
+};
 
-  // ── State ──
+export default function ProfilePage() {
+  const params = useParams();
+  const userId = (params.id as string) || "test-user-001";
+
+  // ── Data state ──
+  const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // ── Edit state ──
   const [editMode, setEditMode] = useState(false);
-  const [blocks, setBlocks] = useState<ProfileBlock[]>(MOCK_BLOCKS);
   const [deltaIntroVisible, setDeltaIntroVisible] = useState(true);
   const [deltaIntroAccepted, setDeltaIntroAccepted] = useState(false);
-  const [deltaTag1Visible, setDeltaTag1Visible] = useState(true);
-  const [deltaTag2Visible, setDeltaTag2Visible] = useState(true);
   const [showInlineAdd, setShowInlineAdd] = useState(false);
   const [newBlockCategory, setNewBlockCategory] = useState("custom");
   const [newBlockText, setNewBlockText] = useState("");
@@ -49,9 +73,51 @@ export default function ProfilePage() {
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [showVisDrawer, setShowVisDrawer] = useState(false);
   const [visTargetBlockId, setVisTargetBlockId] = useState<string | null>(null);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+
+  // ── Toast ──
   const [toastMsg, setToastMsg] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  // ── Fetch profile data ──
+  const fetchProfile = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await fetch(`/api/profile/${userId}`);
+      if (!res.ok) {
+        if (res.status === 404) {
+          setProfile(null);
+          return;
+        }
+        throw new Error(`Fetch error: ${res.status}`);
+      }
+      const data = await res.json();
+      setProfile({
+        ...data,
+        tags: data.tags || [],
+        blocks: (data.blocks || []).map((b: any) => ({
+          id: b.id,
+          category: b.category,
+          label: CAT_NAMES[b.category] || "自定义",
+          text: b.content,
+          source: b.source,
+          visibility: b.visibility,
+        })),
+      });
+      setDeltaIntroVisible(!!data.aiDeltaIntro);
+      setDeltaIntroAccepted(false);
+    } catch (e) {
+      console.error("Fetch profile error:", e);
+      showToast("加载失败，请刷新重试");
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    fetchProfile();
+  }, [fetchProfile]);
 
   // ── Toast ──
   const showToast = useCallback((msg: string) => {
@@ -62,25 +128,73 @@ export default function ProfilePage() {
   }, []);
 
   // ── Delta Intro Actions ──
-  const keepDelta = () => {
-    setDeltaIntroAccepted(true);
-    showToast("增量内容已融入正文");
+  const keepDelta = async () => {
+    if (!profile) return;
+    const newIntro = profile.userConfirmedIntro
+      ? profile.userConfirmedIntro + " " + profile.aiDeltaIntro
+      : profile.aiDeltaIntro;
+
+    try {
+      const res = await fetch(`/api/profile/${userId}/intro`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intro: newIntro, aiDelta: "", source: "user_edited" }),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      setDeltaIntroAccepted(true);
+      await fetchProfile();
+      showToast("增量内容已融入正文");
+    } catch (e) {
+      showToast("保存失败，请重试");
+    }
   };
-  const rejectDelta = () => {
-    setDeltaIntroVisible(false);
-    showToast("已抹除 AI 增量内容");
+
+  const rejectDelta = async () => {
+    if (!profile) return;
+    try {
+      const res = await fetch(`/api/profile/${userId}/intro`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intro: profile.userConfirmedIntro, aiDelta: "", source: profile.introSource }),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      setDeltaIntroVisible(false);
+      await fetchProfile();
+      showToast("已抹除 AI 增量内容");
+    } catch (e) {
+      showToast("保存失败，请重试");
+    }
   };
 
   // ── Delta Tag Actions ──
-  const keepDeltaTag = (which: 1 | 2) => {
-    if (which === 1) setDeltaTag1Visible(false);
-    else setDeltaTag2Visible(false);
-    showToast("标签已确认");
+  const confirmDeltaTag = async (tagId: string) => {
+    try {
+      const res = await fetch(`/api/profile/${userId}/tags/${tagId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "confirm" }),
+      });
+      if (!res.ok) throw new Error("Confirm failed");
+      await fetchProfile();
+      showToast("标签已确认");
+    } catch (e) {
+      showToast("操作失败，请重试");
+    }
   };
-  const rejectDeltaTag = (which: 1 | 2) => {
-    if (which === 1) setDeltaTag1Visible(false);
-    else setDeltaTag2Visible(false);
-    showToast("已抹除 AI 增量标签");
+
+  const rejectDeltaTag = async (tagId: string) => {
+    try {
+      const res = await fetch(`/api/profile/${userId}/tags/${tagId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete" }),
+      });
+      if (!res.ok) throw new Error("Delete failed");
+      await fetchProfile();
+      showToast("已抹除 AI 增量标签");
+    } catch (e) {
+      showToast("操作失败，请重试");
+    }
   };
 
   // ── Content Block Actions ──
@@ -89,40 +203,66 @@ export default function ProfilePage() {
     setEditText(block.text);
   };
   const cancelEdit = () => setEditingBlockId(null);
-  const saveEdit = (blockId: string) => {
-    setBlocks((prev) => prev.map((b) => (b.id === blockId ? { ...b, text: editText } : b)));
-    setEditingBlockId(null);
-    showToast("已保存，AI 不会修改您的内容");
+
+  const saveEdit = async (blockId: string) => {
+    try {
+      const res = await fetch(`/api/profile/${userId}/blocks/${blockId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: editText }),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      setEditingBlockId(null);
+      await fetchProfile();
+      showToast("已保存，AI 不会修改您的内容");
+    } catch (e) {
+      showToast("保存失败，请重试");
+    }
   };
 
   const showDelete = (blockId: string) => {
     setDeleteTargetId(blockId);
     setShowDeleteModal(true);
   };
-  const confirmDelete = () => {
-    if (deleteTargetId) {
-      setBlocks((prev) => prev.filter((b) => b.id !== deleteTargetId));
+
+  const confirmDelete = async () => {
+    if (!deleteTargetId) return;
+    try {
+      const res = await fetch(`/api/profile/${userId}/blocks/${deleteTargetId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Delete failed");
+      setShowDeleteModal(false);
+      setDeleteTargetId(null);
+      await fetchProfile();
+      showToast("内容块已删除");
+    } catch (e) {
+      showToast("删除失败，请重试");
     }
-    setShowDeleteModal(false);
-    setDeleteTargetId(null);
-    showToast("内容块已删除");
   };
 
   // ── Inline Add Block ──
-  const confirmAdd = () => {
+  const confirmAdd = async () => {
     if (!newBlockText.trim()) return;
-    const newBlock: ProfileBlock = {
-      id: Date.now().toString(),
-      category: newBlockCategory,
-      label: CAT_NAMES[newBlockCategory] || "自定义",
-      text: newBlockText.trim(),
-      source: "user",
-      visibility: "public",
-    };
-    setBlocks((prev) => [...prev, newBlock]);
-    setShowInlineAdd(false);
-    setNewBlockText("");
-    showToast("已记录，AI 正在补充相关内容");
+    try {
+      const res = await fetch(`/api/profile/${userId}/blocks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category: newBlockCategory,
+          content: newBlockText.trim(),
+          visibility: "public",
+          source: "user",
+        }),
+      });
+      if (!res.ok) throw new Error("Add failed");
+      setShowInlineAdd(false);
+      setNewBlockText("");
+      await fetchProfile();
+      showToast("已记录，AI 正在补充相关内容");
+    } catch (e) {
+      showToast("添加失败，请重试");
+    }
   };
 
   // ── Visibility ──
@@ -130,31 +270,94 @@ export default function ProfilePage() {
     setVisTargetBlockId(blockId);
     setShowVisDrawer(true);
   };
-  const confirmVisibility = () => {
-    if (visTargetBlockId) {
-      setBlocks((prev) =>
-        prev.map((b) =>
-          b.id === visTargetBlockId
-            ? { ...b, visibility: b.visibility === "public" ? "search_only" : "public" }
-            : b
-        )
-      );
+
+  const confirmVisibility = async () => {
+    if (!visTargetBlockId) return;
+    const block = profile?.blocks.find((b) => b.id === visTargetBlockId);
+    if (!block) return;
+    const newVis = block.visibility === "public" ? "search_only" : "public";
+    try {
+      const res = await fetch(`/api/profile/${userId}/blocks/${visTargetBlockId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visibility: newVis }),
+      });
+      if (!res.ok) throw new Error("Update failed");
+      setShowVisDrawer(false);
+      await fetchProfile();
+      showToast("可见性已更新");
+    } catch (e) {
+      showToast("更新失败，请重试");
     }
-    setShowVisDrawer(false);
-    showToast("可见性已更新");
   };
 
-  const targetBlock = blocks.find((b) => b.id === visTargetBlockId);
+  // ── Generate Image ──
+  const handleUpdateImage = async () => {
+    if (!profile) return;
+    setIsGeneratingImage(true);
+    try {
+      const tagsText = profile.tags.map((t) => t.tagText).join(", ");
+      const res = await fetch("/api/ai/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: tagsText,
+          userId,
+          profileId: profile.id,
+        }),
+      });
+      if (!res.ok) throw new Error("Image generation failed");
+      const data = await res.json();
+      if (data.imageUrl) {
+        await fetchProfile();
+        showToast(data.source === "placeholder" ? "图片占位已更新" : "图片已更新");
+      }
+    } catch (e) {
+      showToast("图片生成失败");
+    } finally {
+      setIsGeneratingImage(false);
+    }
+  };
+
+  // ── Loading state ──
+  if (loading) {
+    return (
+      <main className="py-12 pb-20">
+        <div className="container--narrow text-center py-20">
+          <div className="skeleton skeleton--text skeleton--text-medium mx-auto mb-4" />
+          <div className="skeleton skeleton--text skeleton--text-short mx-auto" />
+        </div>
+      </main>
+    );
+  }
+
+  // ── Empty profile state ──
+  if (!profile) {
+    return (
+      <main className="py-12 pb-20">
+        <div className="container--narrow text-center py-20">
+          <h1 className="font-serif text-display text-text-heading mb-4">个人主页</h1>
+          <p className="text-body-lg text-text-secondary mb-8">你还没有创建个人主页</p>
+          <a href="/create" className="btn-primary">创建我的主页</a>
+        </div>
+      </main>
+    );
+  }
+
+  const targetBlock = profile.blocks.find((b) => b.id === visTargetBlockId);
   const isPublic = targetBlock?.visibility === "public";
+
+  const deltaTags = profile.tags.filter((t) => t.isDelta);
+  const hasDelta = profile.hasUnconfirmedDelta || deltaTags.length > 0 || !!profile.aiDeltaIntro;
 
   return (
     <main className="py-12 pb-20">
       <div className="container--narrow">
         {/* Dirty Banner */}
-        {(deltaIntroVisible || deltaTag1Visible || deltaTag2Visible) && (
+        {hasDelta && (
           <div className="flex items-center gap-2 px-4 py-2.5 bg-accent-surface border border-accent rounded-md mb-6 text-sm text-accent font-medium">
             <span className="bg-accent text-[#FFFAF5] rounded-[10px] px-2 py-0.5 text-xs font-bold min-w-[20px] text-center">
-              {[deltaIntroVisible, deltaTag1Visible, deltaTag2Visible].filter(Boolean).length}
+              {deltaTags.length + (profile.aiDeltaIntro ? 1 : 0)}
             </span>
             条 AI 更新待确认 — 向下滚动至标签与简介区域查看
           </div>
@@ -164,25 +367,31 @@ export default function ProfilePage() {
         <section className="mb-12">
           <div className="relative w-full aspect-[16/9] rounded-md overflow-hidden mb-6"
             style={{
-              background: "linear-gradient(135deg, #E8D5C4 0%, #C49A6C 25%, #9B4D4D 50%, #4A6670 75%, #2C3E50 100%)",
+              background: profile.imageUrl && !profile.imageOutdated
+                ? `url(${profile.imageUrl}) center/cover no-repeat`
+                : "linear-gradient(135deg, #E8D5C4 0%, #C49A6C 25%, #9B4D4D 50%, #4A6670 75%, #2C3E50 100%)",
             }}
           >
-            <div className="absolute inset-0 opacity-20"
-              style={{
-                background: "radial-gradient(ellipse at 30% 50%, rgba(196,154,108,0.25) 0%, transparent 60%), radial-gradient(ellipse at 70% 40%, rgba(155,77,77,0.15) 0%, transparent 50%)",
-              }}
-            />
+            {!profile.imageUrl && (
+              <div className="absolute inset-0 opacity-20"
+                style={{
+                  background: "radial-gradient(ellipse at 30% 50%, rgba(196,154,108,0.25) 0%, transparent 60%), radial-gradient(ellipse at 70% 40%, rgba(155,77,77,0.15) 0%, transparent 50%)",
+                }}
+              />
+            )}
             {/* Stale image bar */}
-            <div className="absolute bottom-0 left-0 right-0 bg-white/85 backdrop-blur-[4px] px-4 py-2 flex items-center justify-between text-xs text-text-secondary">
-              <span>内容已更新，图片可能需要刷新</span>
-              <button className="btn-image-refresh" onClick={() => showToast("正在生成新图片...")}>
-                <span>↻</span> 更新图片
-              </button>
-            </div>
+            {profile.imageOutdated && (
+              <div className="absolute bottom-0 left-0 right-0 bg-white/85 backdrop-blur-[4px] px-4 py-2 flex items-center justify-between text-xs text-text-secondary">
+                <span>内容已更新，图片可能需要刷新</span>
+                <button className="btn-image-refresh" onClick={handleUpdateImage} disabled={isGeneratingImage}>
+                  <span>{isGeneratingImage ? "⟳" : "↻"}</span> {isGeneratingImage ? "生成中..." : "更新图片"}
+                </button>
+              </div>
+            )}
           </div>
           <div className="text-center">
-            <h1 className="font-serif text-display text-text-heading mb-1">张明远</h1>
-            <p className="text-body text-text-secondary">2006 届 · 高三（3）班</p>
+            <h1 className="font-serif text-display text-text-heading mb-1">{profile.userName}</h1>
+            <p className="text-body text-text-secondary">2006 届 · {profile.className}</p>
           </div>
         </section>
 
@@ -190,18 +399,23 @@ export default function ProfilePage() {
         <section className="mb-8">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-h2 text-text-primary">简介</h2>
-            <button className="text-[13px] font-medium text-brand-dark bg-transparent border-none cursor-pointer px-2 py-1 rounded-sm hover:bg-elevated transition-colors" onClick={() => showToast("已进入编辑模式")}>
-              编辑
+            <button
+              className="text-[13px] font-medium text-brand-dark bg-transparent border-none cursor-pointer px-2 py-1 rounded-sm hover:bg-elevated transition-colors"
+              onClick={() => setEditMode(!editMode)}
+            >
+              {editMode ? "完成" : "编辑"}
             </button>
           </div>
-          <p className="text-body-lg leading-relaxed text-text-primary mb-6">
-            前大厂产品负责人，现 AI 创业者。2006 年从实验中学毕业后，进入清华计算机系，之后在互联网行业深耕 15 年。2024 年创立 AI 初创公司，专注于企业知识管理领域。
-          </p>
+          {profile.userConfirmedIntro && (
+            <p className="text-body-lg leading-relaxed text-text-primary mb-6">
+              {profile.userConfirmedIntro}
+            </p>
+          )}
 
-          {deltaIntroVisible && (
+          {profile.aiDeltaIntro && deltaIntroVisible && (
             <div className={`bg-accent-bg border border-dashed border-accent rounded-md p-3.5 mb-3 relative ${deltaIntroAccepted ? "!bg-transparent !border-transparent" : ""}`}>
               <p className="text-body-lg leading-relaxed text-text-primary mb-3">
-                目前在寻找志同道合的技术合伙人，也希望能与校友们交流 AI 创业的心得。周末经常回海淀，偶尔在五道口附近喝咖啡，欢迎约聊。
+                {profile.aiDeltaIntro}
               </p>
               {!deltaIntroAccepted && (
                 <div className="flex gap-2 justify-end">
@@ -209,6 +423,14 @@ export default function ProfilePage() {
                   <button className="btn-delta--reject" onClick={rejectDelta}>抹除</button>
                 </div>
               )}
+            </div>
+          )}
+
+          {!profile.userConfirmedIntro && !profile.aiDeltaIntro && (
+            <div className="text-center py-6 border-y border-border-light">
+              <p className="text-body text-text-placeholder font-serif">
+                你的故事，将由 AI 与你一起书写
+              </p>
             </div>
           )}
         </section>
@@ -219,29 +441,42 @@ export default function ProfilePage() {
             <h2 className="text-h2 text-text-primary">标签</h2>
           </div>
           <div className="flex flex-wrap gap-2">
-            <span className="tag tag--belong">实验中学 2006</span>
-            <span className="tag tag--belong">清华计算机系</span>
-            <span className="tag tag--offer">AI 创业</span>
-            <span className="tag tag--offer">企业知识管理</span>
-            <span className="tag tag--offer">产品设计</span>
-            <span className="tag tag--follow">科技前沿</span>
-            <span className="tag tag--follow">独立音乐</span>
-
-            {deltaTag1Visible && (
-              <span className="tag tag--delta cursor-pointer" onClick={() => keepDeltaTag(1)}>
-                寻找技术合伙人
-                <span className="tag__close" onClick={(e) => { e.stopPropagation(); rejectDeltaTag(1); }}>✕</span>
-              </span>
+            {profile.tags.length > 0 ? (
+              profile.tags.map((tag) => {
+                const isDelta = tag.isDelta;
+                const isSearchOnly = tag.visibility === "search_only";
+                const isUserEdited = tag.source === "user_edited";
+                if (isDelta) {
+                  return (
+                    <span key={tag.id} className="tag tag--delta cursor-pointer">
+                      {tag.tagText}
+                      <span className="tag__close" onClick={(e) => { e.stopPropagation(); rejectDeltaTag(tag.id); }}>✕</span>
+                      <span
+                        className="absolute inset-0"
+                        onClick={() => confirmDeltaTag(tag.id)}
+                        title="点击确认标签"
+                      />
+                    </span>
+                  );
+                }
+                return (
+                  <span
+                    key={tag.id}
+                    className={`tag ${TAG_CLASS_MAP[tag.tagType] || "tag--follow"} ${isSearchOnly ? "tag--search-only" : ""} ${isUserEdited ? "tag--user-edited" : ""}`}
+                  >
+                    {tag.tagText}
+                    {isSearchOnly && <span className="ml-0.5 text-[8px]">🔒</span>}
+                  </span>
+                );
+              })
+            ) : (
+              <>
+                <span className="tag tag--belong opacity-40" style={{ borderStyle: "dashed", background: "transparent" }}>属于</span>
+                <span className="tag tag--offer opacity-40" style={{ borderStyle: "dashed", background: "transparent" }}>提供</span>
+                <span className="tag tag--need opacity-40" style={{ borderStyle: "dashed", background: "transparent" }}>需要</span>
+                <span className="tag tag--follow opacity-40" style={{ borderStyle: "dashed", background: "transparent" }}>关注</span>
+              </>
             )}
-            {deltaTag2Visible && (
-              <span className="tag tag--delta cursor-pointer" onClick={() => keepDeltaTag(2)}>
-                海淀咖啡
-                <span className="tag__close" onClick={(e) => { e.stopPropagation(); rejectDeltaTag(2); }}>✕</span>
-              </span>
-            )}
-
-            <span className="tag tag--need tag--search-only">天使投资</span>
-            <span className="tag tag--belong tag--user-edited">北京</span>
           </div>
         </section>
 
@@ -251,57 +486,69 @@ export default function ProfilePage() {
             <h2 className="text-h2 text-text-primary">内容块</h2>
           </div>
 
-          <div className="flex flex-col gap-3">
-            {blocks.map((block) => (
-              <div
-                key={block.id}
-                className={`card card--content-block ${block.category} ${editingBlockId === block.id ? "!border-accent !bg-accent-surface" : ""}`}
+          {profile.blocks.length === 0 ? (
+            <div className="card card--placeholder mb-4">
+              <p className="placeholder-text">点击下方按钮，开始添加你的第一个内容块</p>
+              <button
+                className="btn-primary"
+                onClick={() => { setShowInlineAdd(true); setEditMode(true); }}
               >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[13px] font-semibold text-text-primary">{block.label}</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="inline-flex items-center px-1.5 py-px text-[10px] font-medium text-accent rounded-[2px] tracking-[0.02em]" style={{ background: "rgba(196,154,108,0.12)" }}>
-                      {block.source}
-                    </span>
-                    <span
-                      className={`inline-flex items-center gap-[3px] px-1.5 py-px text-[10px] font-medium rounded-[2px] cursor-pointer select-none transition-all hover:brightness-90 ${
-                        block.visibility === "public"
-                          ? "text-accent-green bg-[rgba(122,139,111,0.12)]"
-                          : "text-accent bg-[rgba(196,154,108,0.12)]"
-                      }`}
-                      onClick={() => toggleVisibility(block.id)}
-                    >
-                      {block.visibility === "public" ? "公开" : "仅搜索"}
-                    </span>
-                  </div>
-                </div>
-
-                {editingBlockId === block.id ? (
-                  <>
-                    <textarea
-                      className="w-full border border-border rounded-sm px-3 py-2.5 text-sm font-sans text-text-primary bg-surface leading-relaxed min-h-[60px] resize-y focus:outline-none focus:border-accent"
-                      value={editText}
-                      onChange={(e) => setEditText(e.target.value)}
-                    />
-                    <div className="flex gap-2 justify-end mt-2.5">
-                      <button className="btn-ghost text-[13px] py-1.5 px-3" onClick={cancelEdit}>取消</button>
-                      <button className="btn-primary text-xs py-1.5 px-3.5" onClick={() => saveEdit(block.id)}>保存</button>
+                开始添加
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {profile.blocks.map((block) => (
+                <div
+                  key={block.id}
+                  className={`card card--content-block ${block.category} ${editingBlockId === block.id ? "!border-accent !bg-accent-surface" : ""}`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[13px] font-semibold text-text-primary">{block.label}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-flex items-center px-1.5 py-px text-[10px] font-medium text-accent rounded-[2px] tracking-[0.02em]" style={{ background: "rgba(196,154,108,0.12)" }}>
+                        {block.source}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-[3px] px-1.5 py-px text-[10px] font-medium rounded-[2px] cursor-pointer select-none transition-all hover:brightness-90 ${
+                          block.visibility === "public"
+                            ? "text-accent-green bg-[rgba(122,139,111,0.12)]"
+                            : "text-accent bg-[rgba(196,154,108,0.12)]"
+                        }`}
+                        onClick={() => toggleVisibility(block.id)}
+                      >
+                        {block.visibility === "public" ? "公开" : "仅搜索"}
+                      </span>
                     </div>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-sm leading-relaxed text-text-primary">{block.text}</p>
-                    {editMode && (
+                  </div>
+
+                  {editingBlockId === block.id ? (
+                    <>
+                      <textarea
+                        className="w-full border border-border rounded-sm px-3 py-2.5 text-sm font-sans text-text-primary bg-surface leading-relaxed min-h-[60px] resize-y focus:outline-none focus:border-accent"
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                      />
                       <div className="flex gap-2 justify-end mt-2.5">
-                        <button className="btn-ghost text-[13px] py-1.5 px-3" onClick={() => startEdit(block)}>编辑</button>
-                        <button className="btn-ghost text-[13px] py-1.5 px-3 !text-error hover:!bg-error-surface" onClick={() => showDelete(block.id)}>删除</button>
+                        <button className="btn-ghost text-[13px] py-1.5 px-3" onClick={cancelEdit}>取消</button>
+                        <button className="btn-primary text-xs py-1.5 px-3.5" onClick={() => saveEdit(block.id)}>保存</button>
                       </div>
-                    )}
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm leading-relaxed text-text-primary">{block.text}</p>
+                      {editMode && (
+                        <div className="flex gap-2 justify-end mt-2.5">
+                          <button className="btn-ghost text-[13px] py-1.5 px-3" onClick={() => startEdit(block)}>编辑</button>
+                          <button className="btn-ghost text-[13px] py-1.5 px-3 !text-error hover:!bg-error-surface" onClick={() => showDelete(block.id)}>删除</button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Inline Add Form */}
           {showInlineAdd && (
@@ -377,7 +624,9 @@ export default function ProfilePage() {
                   isPublic ? "border-primary bg-primary-surface" : "border-border-light hover:border-border hover:bg-elevated"
                 }`}
                 onClick={() => {
-                  setBlocks((prev) => prev.map((b) => (b.id === visTargetBlockId ? { ...b, visibility: "public" } : b)));
+                  if (targetBlock) {
+                    targetBlock.visibility = "public";
+                  }
                 }}
               >
                 <div className={`w-[18px] h-[18px] rounded-full border-2 flex-shrink-0 mt-px transition-all ${
@@ -393,7 +642,9 @@ export default function ProfilePage() {
                   !isPublic ? "border-primary bg-primary-surface" : "border-border-light hover:border-border hover:bg-elevated"
                 }`}
                 onClick={() => {
-                  setBlocks((prev) => prev.map((b) => (b.id === visTargetBlockId ? { ...b, visibility: "search_only" } : b)));
+                  if (targetBlock) {
+                    targetBlock.visibility = "search_only";
+                  }
                 }}
               >
                 <div className={`w-[18px] h-[18px] rounded-full border-2 flex-shrink-0 mt-px transition-all ${

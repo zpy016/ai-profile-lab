@@ -5,30 +5,12 @@ import Link from "next/link";
 
 // ── Types ──
 type CabinState = "idle" | "parsing" | "field_filling" | "error";
-type ReviewTag = { name: string; cat: string; delta: boolean };
-type ReviewBlock = { label: string; text: string; cat: string; delta: boolean };
+type ReviewTag = { name: string; cat: string; delta: boolean; id?: string };
+type ReviewBlock = { label: string; text: string; cat: string; delta: boolean; id?: string };
 
-// ── Mock data for POC demo ──
-const MOCK_TAGS: ReviewTag[] = [
-  { name: "实验中学 2006", cat: "belong", delta: false },
-  { name: "清华计算机系", cat: "belong", delta: false },
-  { name: "AI 创业", cat: "offer", delta: false },
-  { name: "产品设计", cat: "offer", delta: false },
-  { name: "独立音乐", cat: "follow", delta: false },
-  { name: "寻找技术合伙人", cat: "need", delta: true },
-  { name: "天使投资", cat: "need", delta: true },
-];
-const MOCK_BASE_INTRO = "前大厂产品负责人，现 AI 创业者。2006 年从实验中学毕业后，进入清华计算机系，之后在互联网行业深耕 15 年。2024 年创立 AI 初创公司，专注于企业知识管理领域。";
-const MOCK_DELTA_INTRO = "目前正在寻找技术合伙人，也希望能与校友们交流 AI 创业心得。";
-const MOCK_BLOCKS: ReviewBlock[] = [
-  { label: "自我介绍", text: "AI 创业者，前大厂产品负责人，2006 年从实验中学毕业。", cat: "self_intro", delta: false },
-  { label: "历史背景", text: "清华计算机系毕业，15 年互联网行业经验，字节跳动、美团。", cat: "background", delta: false },
-  { label: "能提供的", text: "AI 产品设计咨询、创业经验分享、技术团队管理经验。", cat: "offer", delta: false },
-  { label: "具体需求", text: "寻找技术合伙人（后端/算法），天使轮融资机会。", cat: "need", delta: true },
-];
-
-// ── Breadcrumb Step Type ──
 type BreadcrumbStep = "quick" | "review" | "published";
+
+const USER_ID = "test-user-001";
 
 export default function QuickCreatePage() {
   // ── State ──
@@ -44,6 +26,7 @@ export default function QuickCreatePage() {
   const [deltaAccepted, setDeltaAccepted] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [hasDraft, setHasDraft] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
 
@@ -76,8 +59,8 @@ export default function QuickCreatePage() {
     }
   }, [autoResize]);
 
-  // ── Simulate AI Parsing ──
-  const handleGenerate = useCallback(() => {
+  // ── Call AI Extract Tags API ──
+  const handleGenerate = useCallback(async () => {
     if (!inputText.trim()) {
       setCabinState("error");
       setTimeout(() => setCabinState("idle"), 400);
@@ -87,21 +70,64 @@ export default function QuickCreatePage() {
     setCabinState("parsing");
     setIsGenerating(true);
     setShowParsingSkeleton(true);
+    setErrorMsg("");
     previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
-    // After 2.5s, transition to review
-    setTimeout(() => {
+    try {
+      const res = await fetch("/api/ai/extract-tags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: inputText, userId: USER_ID }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`API error: ${res.status}`);
+      }
+
+      const data = await res.json();
+
+      // Map API response to review format
+      const apiTags: ReviewTag[] = [
+        ...(data.tags || []).map((t: any) => ({
+          name: t.text || t.tagText,
+          cat: t.type || t.tagType || "follow",
+          delta: false,
+        })),
+        ...(data.delta_tags || []).map((t: any) => ({
+          name: t.text || t.tagText,
+          cat: t.type || t.tagType || "need",
+          delta: true,
+        })),
+      ];
+
+      const apiBlocks: ReviewBlock[] = (data.content_blocks || []).map((b: any) => ({
+        label: b.category === "self_intro" ? "自我介绍" :
+               b.category === "background" ? "历史背景" :
+               b.category === "offer" ? "能提供的" :
+               b.category === "need" ? "具体需求" : "自定义",
+        text: b.content,
+        cat: b.category,
+        delta: false,
+      }));
+
       setCabinState("idle");
       setIsGenerating(false);
       setShowParsingSkeleton(false);
-      setTags(MOCK_TAGS);
-      setBaseIntro(MOCK_BASE_INTRO);
-      setDeltaIntro(MOCK_DELTA_INTRO);
-      setBlocks(MOCK_BLOCKS);
+      setTags(apiTags);
+      setBaseIntro(data.intro || "");
+      setDeltaIntro(data.delta_intro || "");
+      setBlocks(apiBlocks);
       setRejectedTags(new Set());
       setDeltaAccepted(false);
       setStep("review");
-    }, 2500);
+    } catch (err: any) {
+      console.error("Generate error:", err);
+      setCabinState("error");
+      setIsGenerating(false);
+      setShowParsingSkeleton(false);
+      setErrorMsg(err.message || "AI 分析失败，请重试");
+      setTimeout(() => setCabinState("idle"), 800);
+    }
   }, [inputText]);
 
   // ── Review Tag Toggle ──
@@ -118,7 +144,7 @@ export default function QuickCreatePage() {
   // ── Review Intro Actions ──
   const acceptDeltaIntro = useCallback(() => {
     setDeltaAccepted(true);
-    setBaseIntro((prev) => prev + " " + deltaIntro);
+    setBaseIntro((prev) => (prev ? prev + " " + deltaIntro : deltaIntro));
   }, [deltaIntro]);
 
   const rejectDeltaIntro = useCallback(() => {
@@ -126,9 +152,58 @@ export default function QuickCreatePage() {
   }, []);
 
   // ── Publish ──
-  const handlePublish = useCallback(() => {
-    setStep("published");
-  }, []);
+  const handlePublish = useCallback(async () => {
+    const acceptedTags = tags
+      .filter((t) => !rejectedTags.has(t.name))
+      .map((t) => ({
+        text: t.name,
+        type: t.cat,
+        source: t.delta ? "ai" : "user_edited",
+        visibility: "public" as const,
+      }));
+
+    const acceptedBlocks = blocks.map((b) => ({
+      category: b.cat,
+      content: b.text,
+      source: "ai_extracted",
+      visibility: "public" as const,
+    }));
+
+    const finalIntro = deltaAccepted || !deltaIntro
+      ? baseIntro
+      : baseIntro;
+
+    try {
+      const res = await fetch(`/api/profile/${USER_ID}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tags: acceptedTags,
+          intro: finalIntro,
+          blocks: acceptedBlocks,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`Publish failed: ${res.status}`);
+      }
+
+      setStep("published");
+      localStorage.removeItem("draft:quick");
+
+      // Trigger image generation asynchronously
+      fetch("/api/ai/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: acceptedTags.map((t) => t.text).join(", "),
+          userId: USER_ID,
+        }),
+      }).catch((e) => console.error("Background image gen error:", e));
+    } catch (err: any) {
+      setErrorMsg(err.message || "发布失败，请重试");
+    }
+  }, [tags, rejectedTags, blocks, baseIntro, deltaIntro, deltaAccepted]);
 
   // ── Reset ──
   const handleReset = useCallback(() => {
@@ -144,6 +219,7 @@ export default function QuickCreatePage() {
     setDeltaAccepted(false);
     setIsGenerating(false);
     setHasDraft(false);
+    setErrorMsg("");
     localStorage.removeItem("draft:quick");
     if (textareaRef.current) {
       textareaRef.current.style.height = "120px";
@@ -191,6 +267,13 @@ export default function QuickCreatePage() {
             <p className="text-body-lg text-text-secondary leading-relaxed">
               以下是 AI 为你提取的内容，请逐条确认。AI 新增的内容以琥珀金色标示。
             </p>
+          </div>
+        )}
+
+        {/* Error banner */}
+        {errorMsg && (
+          <div className="px-4 py-2.5 bg-error-surface border border-error rounded-md mb-4 text-sm text-error">
+            {errorMsg}
           </div>
         )}
 
@@ -303,7 +386,7 @@ export default function QuickCreatePage() {
                   else cls += " opacity-100";
                   return (
                     <span
-                      key={t.name}
+                      key={t.name + i}
                       className={`inline-flex items-center gap-1 rounded-[3px] px-2.5 py-1 text-xs font-semibold font-sans tracking-[0.01em] cursor-pointer select-none transition-all hover:scale-[1.04] ${cls}`}
                       onClick={() => toggleTag(t.name, t.delta)}
                       style={{ animationDelay: `${i * 0.05}s` }}
@@ -345,7 +428,7 @@ export default function QuickCreatePage() {
               <div className="text-xs font-semibold text-text-secondary uppercase tracking-[0.04em] mb-2.5">内容块 — AI 整理的结构化信息</div>
               {blocks.map((b) => (
                 <div
-                  key={b.label}
+                  key={b.label + b.text.slice(0, 20)}
                   className={`bg-surface border border-border rounded-md px-4 py-2.5 mb-2 shadow-sm relative ${b.delta ? "border-l-[3px] border-l-accent" : ""}`}
                 >
                   <div className="flex items-center justify-between mb-1">
@@ -370,8 +453,8 @@ export default function QuickCreatePage() {
               <p className="text-[15px] text-text-secondary mb-8">2006 届的同学们现在可以看到你了</p>
             </div>
             <div className="flex flex-col items-center gap-3">
-              <Link href="/profile/test-user-001" className="btn-primary w-[220px]">查看我的主页</Link>
-              <Link href="/profile/test-user-001" className="btn-secondary w-[220px]">继续完善</Link>
+              <Link href={`/profile/${USER_ID}`} className="btn-primary w-[220px]">查看我的主页</Link>
+              <Link href={`/profile/${USER_ID}`} className="btn-secondary w-[220px]">继续完善</Link>
               <Link href="/" className="btn-ghost w-[220px]">返回基地</Link>
             </div>
             <div className="mt-10 px-5 py-3 bg-accent-surface border border-dashed border-accent rounded-md inline-flex items-center gap-2 text-[13px] text-accent">

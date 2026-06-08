@@ -1,28 +1,105 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
+
+interface PromptData {
+  id: string;
+  promptKey: string;
+  content: string;
+  version: number;
+}
+
+interface LogEntry {
+  id: string;
+  createdAt: string;
+  action: string;
+  input: string;
+  output: string;
+  model: string;
+  userModified: boolean;
+  modificationType: string | null;
+  modification: string;
+}
+
+interface LogStats {
+  total: number;
+  substantive: number;
+  cosmetic: number;
+  deltaRejected: number;
+}
+
+const DEFAULT_PROMPTS: Record<string, string> = {
+  extract_tags: `你是一位校友档案整理员。请从以下自我介绍中提取标签，每个标签不超过8个字。
+标签分为四类：属于（身份归属）、提供（能给予的）、需要（需要的）、关注（兴趣爱好）。
+输出JSON格式，包含 tags 数组（每个有 text 和 type 字段）、content_blocks 数组（每个有 category 和 content 字段）、intro 字段。`,
+  generate_intro: `你是一位克制得体的档案撰写人，为2006届实验中学毕业的同学撰写个人简介。
+请使用第三人称，语气温和体面，不超过200字。
+避免空洞的形容词，注重具体的事实和经历。
+保持「数字纪念册」的克制怀旧文风。`,
+  generate_image: `Generate an abstract cover image for this alumni profile.
+Use elements that reflect the person's identity, profession and background. Soft lighting, editorial quality.`,
+  interview_guide: `你是实验中学2006届校友的AI采访助手。你的采访风格温暖而专业，像老朋友在咖啡馆聊天。
+你需要逐步覆盖四个维度：自我介绍 → 历史背景 → 能提供的 → 具体需求。
+每个问题不超过30字，保持克制得体。`,
+};
+
+const IMAGE_LOCKED_PREFIX =
+  "abstract composition, muted morandi palette, no human face, no text, digital yearbook aesthetic, subtle geometric forms, warm nostalgic atmosphere, 16:9 aspect ratio";
 
 export default function AdminPage() {
-  const [model, setModel] = useState("deepseek-v4-pro");
+  const [model, setModel] = useState("ep-20260608013645-vmmr2");
   const [temperature, setTemperature] = useState(0.7);
-  const [tagPrompt, setTagPrompt] = useState(
-    `你是一位校友档案整理员。请从以下自我介绍中提取标签，每个标签不超过8个字。标签分为四类：属于（身份归属）、提供（能给予的）、需要（需要的）、关注（兴趣爱好）。输出JSON格式。`
-  );
-  const [introPrompt, setIntroPrompt] = useState(
-    `你是一位克制得体的档案撰写人，为2006届实验中学毕业的同学撰写个人简介。请使用第三人称，语气温和体面，不超过200字。避免空洞的形容词，注重具体的事实和经历。`
-  );
-  const [imagePrompt, setImagePrompt] = useState(
-    `Generate an abstract cover image for this alumni profile. Use elements that reflect: {user_tags}, {profession}, {hometown}. Soft lighting, editorial quality.`
-  );
-  const [interviewPrompt, setInterviewPrompt] = useState(
-    `你是实验中学2006届校友的AI采访助手。你的采访风格温暖而专业，像老朋友在咖啡馆聊天。你需要逐步覆盖四个维度：自我介绍 → 历史背景 → 能提供的 → 具体需求。每个问题不超过30字，保持克制得体。`
-  );
+  const [prompts, setPrompts] = useState<Record<string, PromptData>>({});
+  const [promptsLoaded, setPromptsLoaded] = useState(false);
+
+  const [tagPrompt, setTagPrompt] = useState(DEFAULT_PROMPTS.extract_tags);
+  const [introPrompt, setIntroPrompt] = useState(DEFAULT_PROMPTS.generate_intro);
+  const [imagePrompt, setImagePrompt] = useState(DEFAULT_PROMPTS.generate_image);
+  const [interviewPrompt, setInterviewPrompt] = useState(DEFAULT_PROMPTS.interview_guide);
+
   const [targetDimensions, setTargetDimensions] = useState(4);
   const [maxRounds, setMaxRounds] = useState(8);
   const [isRegenerating, setIsRegenerating] = useState(false);
+
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [logStats, setLogStats] = useState<LogStats>({ total: 0, substantive: 0, cosmetic: 0, deltaRejected: 0 });
+  const [logsLoaded, setLogsLoaded] = useState(false);
+
+  const [savingPrompt, setSavingPrompt] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  // ── Load prompts ──
+  useEffect(() => {
+    fetch("/api/admin/prompts")
+      .then((r) => r.json())
+      .then((data: PromptData[]) => {
+        const map: Record<string, PromptData> = {};
+        for (const p of data) {
+          map[p.promptKey] = p;
+        }
+        setPrompts(map);
+        if (map.extract_tags) setTagPrompt(map.extract_tags.content);
+        if (map.generate_intro) setIntroPrompt(map.generate_intro.content);
+        if (map.generate_image) setImagePrompt(map.generate_image.content);
+        if (map.interview_guide) setInterviewPrompt(map.interview_guide.content);
+        setPromptsLoaded(true);
+      })
+      .catch((e) => console.error("Load prompts error:", e));
+  }, []);
+
+  // ── Load logs ──
+  useEffect(() => {
+    fetch("/api/admin/logs?limit=20")
+      .then((r) => r.json())
+      .then((data) => {
+        setLogs(data.logs || []);
+        setLogStats(data.stats || { total: 0, substantive: 0, cosmetic: 0, deltaRejected: 0 });
+        setLogsLoaded(true);
+      })
+      .catch((e) => console.error("Load logs error:", e));
+  }, []);
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -31,12 +108,55 @@ export default function AdminPage() {
     toastTimer.current = setTimeout(() => setToastVisible(false), 2500);
   }, []);
 
+  // ── Save prompt ──
+  const savePrompt = async (key: string, content: string) => {
+    setSavingPrompt(key);
+    try {
+      const res = await fetch("/api/admin/prompts", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ promptKey: key, content }),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      const data = await res.json();
+      setPrompts((prev) => ({ ...prev, [key]: data }));
+      showToast("Prompt 已保存");
+    } catch (e) {
+      showToast("保存失败，请重试");
+    } finally {
+      setSavingPrompt(null);
+    }
+  };
+
   const handleRegenerate = () => {
     setIsRegenerating(true);
     setTimeout(() => {
       setIsRegenerating(false);
-      showToast("预览已更新");
+      showToast("预览已更新（模拟）");
     }, 1800);
+  };
+
+  const getTagColor = (type: string | null) => {
+    switch (type) {
+      case "substantive": return { bg: "bg-primary-surface", color: "text-primary" };
+      case "cosmetic": return { bg: "bg-info-surface", color: "text-info" };
+      case "delta_rejected": return { bg: "bg-accent-surface", color: "text-accent" };
+      default: return { bg: "bg-success-surface", color: "text-success" };
+    }
+  };
+
+  const getTagLabel = (type: string | null) => {
+    switch (type) {
+      case "substantive": return "实质性纠偏";
+      case "cosmetic": return "轻微润色";
+      case "delta_rejected": return "增量抹除";
+      default: return "新增内容";
+    }
+  };
+
+  const formatTime = (iso: string) => {
+    const d = new Date(iso);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   };
 
   return (
@@ -149,7 +269,7 @@ export default function AdminPage() {
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
                 >
-                  <option value="deepseek-v4-pro">DeepSeek-V4-pro（当前使用）</option>
+                  <option value="ep-20260608013645-vmmr2">DeepSeek-V4-pro｜260425（当前使用）</option>
                   <option value="deepseek-v4-lite">DeepSeek-V4-lite（快速）</option>
                   <option value="doubao-pro-32k">Doubao Pro 32K</option>
                   <option value="doubao-lite">Doubao Lite</option>
@@ -177,29 +297,63 @@ export default function AdminPage() {
             {/* Prompt Editors */}
             <section className="mb-8">
               <div className="text-h2 text-text-primary mb-0.5">Prompt 编辑器</div>
-              <div className="text-[13px] text-text-secondary mb-4">调整 AI 行为，修改后点击「重新生成预览」生效</div>
+              <div className="text-[13px] text-text-secondary mb-4">调整 AI 行为，修改后点击保存生效</div>
 
-              {[
-                { label: "标签提取", value: tagPrompt, setter: setTagPrompt, rows: 3 },
-                { label: "简介生成", value: introPrompt, setter: setIntroPrompt, rows: 3 },
-              ].map((item) => (
-                <div key={item.label} className="mb-4">
-                  <label className="text-[13px] font-medium text-text-primary mb-1.5 block">{item.label}</label>
-                  <textarea
-                    className="w-full border border-border rounded-sm p-3.5 text-[13px] font-mono leading-relaxed resize-y min-h-[80px] focus:outline-none focus:border-brand-dark"
-                    rows={item.rows}
-                    value={item.value}
-                    onChange={(e) => item.setter(e.target.value)}
-                  />
+              {/* Tag Extract */}
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[13px] font-medium text-text-primary">标签提取</label>
+                  <button
+                    className="text-xs text-accent font-medium"
+                    onClick={() => savePrompt("extract_tags", tagPrompt)}
+                    disabled={savingPrompt === "extract_tags"}
+                  >
+                    {savingPrompt === "extract_tags" ? "保存中..." : "保存"}
+                  </button>
                 </div>
-              ))}
+                <textarea
+                  className="w-full border border-border rounded-sm p-3.5 text-[13px] font-mono leading-relaxed resize-y min-h-[80px] focus:outline-none focus:border-brand-dark"
+                  rows={3}
+                  value={tagPrompt}
+                  onChange={(e) => setTagPrompt(e.target.value)}
+                />
+              </div>
+
+              {/* Intro Generate */}
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[13px] font-medium text-text-primary">简介生成</label>
+                  <button
+                    className="text-xs text-accent font-medium"
+                    onClick={() => savePrompt("generate_intro", introPrompt)}
+                    disabled={savingPrompt === "generate_intro"}
+                  >
+                    {savingPrompt === "generate_intro" ? "保存中..." : "保存"}
+                  </button>
+                </div>
+                <textarea
+                  className="w-full border border-border rounded-sm p-3.5 text-[13px] font-mono leading-relaxed resize-y min-h-[80px] focus:outline-none focus:border-brand-dark"
+                  rows={3}
+                  value={introPrompt}
+                  onChange={(e) => setIntroPrompt(e.target.value)}
+                />
+              </div>
 
               {/* Image Prompt with locked prefix */}
               <div className="mb-4">
-                <label className="text-[13px] font-medium text-text-primary mb-1.5 block">图片生成</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[13px] font-medium text-text-primary">图片生成</label>
+                  <button
+                    className="text-xs text-accent font-medium"
+                    onClick={() => savePrompt("generate_image", imagePrompt)}
+                    disabled={savingPrompt === "generate_image"}
+                  >
+                    {savingPrompt === "generate_image" ? "保存中..." : "保存"}
+                  </button>
+                </div>
                 <div className="bg-elevated border border-border-light rounded-sm p-2.5 mb-2 font-mono text-xs leading-relaxed text-text-placeholder whitespace-pre-wrap break-all flex items-start gap-2">
                   <span className="flex-shrink-0 mt-px text-text-disabled text-[13px]">🔒</span>
-                  <span>[系统锁定] abstract composition, muted morandi palette, no human face, no text, digital yearbook aesthetic, subtle geometric forms, warm nostalgic atmosphere, 16:9 aspect ratio</span>
+                  <span>[系统锁定] {IMAGE_LOCKED_PREFIX}</span>
                 </div>
                 <textarea
                   className="w-full border border-border rounded-sm p-3.5 text-[13px] font-mono leading-relaxed resize-y min-h-[80px] focus:outline-none focus:border-brand-dark"
@@ -211,7 +365,16 @@ export default function AdminPage() {
 
               {/* Interview Prompt */}
               <div>
-                <label className="text-[13px] font-medium text-text-primary mb-1.5 block">采访引导</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[13px] font-medium text-text-primary">采访引导</label>
+                  <button
+                    className="text-xs text-accent font-medium"
+                    onClick={() => savePrompt("interview_guide", interviewPrompt)}
+                    disabled={savingPrompt === "interview_guide"}
+                  >
+                    {savingPrompt === "interview_guide" ? "保存中..." : "保存"}
+                  </button>
+                </div>
                 <textarea
                   className="w-full border border-border rounded-sm p-3.5 text-[13px] font-mono leading-relaxed resize-y min-h-[80px] focus:outline-none focus:border-brand-dark"
                   rows={3}
@@ -270,10 +433,10 @@ export default function AdminPage() {
               {/* Stats */}
               <div className="flex gap-4 mb-4 p-3.5 bg-elevated rounded-sm">
                 {[
-                  { value: "10", label: "总操作数" },
-                  { value: "3", label: "增量抹除", warn: true },
-                  { value: "6", label: "用户确认" },
-                  { value: "1", label: "错误" },
+                  { value: String(logStats.total), label: "总操作数" },
+                  { value: String(logStats.deltaRejected), label: "增量抹除", warn: true },
+                  { value: String(logStats.substantive + logStats.cosmetic), label: "用户确认" },
+                  { value: "0", label: "错误" },
                 ].map((s, i) => (
                   <div key={i} className="flex-1 text-center">
                     <div className={`text-[20px] font-semibold ${s.warn ? "text-accent" : "text-text-primary"}`}>{s.value}</div>
@@ -284,41 +447,37 @@ export default function AdminPage() {
 
               {/* Log List */}
               <div className="flex flex-col gap-2">
-                {[
-                  { time: "2026-06-07 17:32", type: "correction", tag: "实质性纠偏", body: <>输入：<strong>「我搞产品很多年了」</strong> → AI 提取标签「资深产品经理」→ 用户手动改为「产品设计」</> },
-                  { time: "2026-06-07 17:30", type: "delta_removed", tag: "增量抹除", body: <>输入：<strong>「周末喜欢爬山、看书」</strong> → AI 生成增量「户外运动达人」→ 用户一键 <span style={{ color: "var(--color-error)" }}>抹除</span> 该标签</> },
-                  { time: "2026-06-07 17:28", type: "new_content", tag: "新增内容", body: <>输入：<strong>「我在创业」</strong> → AI 生成内容块「自我介绍」+ 标签「AI 创业」→ 用户全部确认</> },
-                  { time: "2026-06-07 17:25", type: "correction", tag: "实质性纠偏", body: <>输入：<strong>「清华毕业」</strong> → AI 推断「清华经管」→ 用户更正为「清华计算机系」</> },
-                  { time: "2026-06-07 17:20", type: "delta_removed", tag: "增量抹除", extraTag: "异常", body: <>输入：<strong>「海淀咖啡馆常客」</strong> → AI 生成标签「五道口咖啡师」→ 用户抹除 → <span style={{ color: "var(--color-error)" }}>注意：本轮 AI 误解了用户意图</span></> },
-                  { time: "2026-06-07 16:55", type: "new_content", tag: "新增内容", body: <>输入：<strong>「我做过产品，带过团队」</strong> → AI 生成内容块「历史背景」+ 标签「产品设计」→ 用户全部确认</> },
-                ].map((log, i) => {
-                  const tagColors: Record<string, { bg: string; color: string }> = {
-                    correction: { bg: "bg-primary-surface", color: "text-primary" },
-                    delta_removed: { bg: "bg-accent-surface", color: "text-accent" },
-                    new_content: { bg: "bg-success-surface", color: "text-success" },
-                  };
-                  const tc = tagColors[log.type] || { bg: "bg-elevated", color: "text-text-placeholder" };
-                  return (
-                    <div key={i} className="bg-surface border border-border-light rounded-sm p-3 hover:border-border transition-colors">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-xs text-text-placeholder font-normal">{log.time}</span>
-                        <div className="flex gap-1 flex-wrap">
-                          <span className={`inline-flex items-center rounded-[2px] px-1.5 py-px text-[10px] font-semibold font-sans tracking-[0.02em] ${tc.bg} ${tc.color}`}>
-                            {log.tag}
-                          </span>
-                          {log.extraTag && (
-                            <span className="inline-flex items-center rounded-[2px] px-1.5 py-px text-[10px] font-semibold font-sans tracking-[0.02em] bg-error-surface text-error">
-                              {log.extraTag}
+                {logs.length > 0 ? (
+                  logs.map((log) => {
+                    const tc = getTagColor(log.modificationType);
+                    return (
+                      <div key={log.id} className="bg-surface border border-border-light rounded-sm p-3 hover:border-border transition-colors">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-xs text-text-placeholder font-normal">{formatTime(log.createdAt)}</span>
+                          <div className="flex gap-1 flex-wrap">
+                            <span className={`inline-flex items-center rounded-[2px] px-1.5 py-px text-[10px] font-semibold font-sans tracking-[0.02em] ${tc.bg} ${tc.color}`}>
+                              {getTagLabel(log.modificationType)}
                             </span>
+                          </div>
+                        </div>
+                        <div className="text-xs leading-relaxed text-text-secondary">
+                          操作：<strong>{log.action}</strong> · 模型：{log.model || "unknown"}
+                          {log.modification && (
+                            <div className="mt-1 text-text-placeholder">{log.modification}</div>
                           )}
                         </div>
                       </div>
-                      <div className="text-xs leading-relaxed text-text-secondary">
-                        {log.body}
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                ) : logsLoaded ? (
+                  <div className="text-center py-6 text-text-placeholder text-sm">暂无日志记录</div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="skeleton skeleton--block" />
+                    ))}
+                  </div>
+                )}
               </div>
             </section>
           </div>
