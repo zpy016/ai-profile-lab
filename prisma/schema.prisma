@@ -88,3 +88,12 @@ model PromptVersion {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
 }
+
+model PromptTemplate {
+  id          String   @id @default(uuid())
+  name        String
+  description String   @default("")
+  config      String   // JSON string: { model, temperature, targetDimensions, maxRounds, prompts }
+  isPublic    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}

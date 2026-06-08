@@ -70,7 +70,7 @@ export default function AdminPage() {
 
   const [targetDimensions, setTargetDimensions] = useState(4);
   const [maxRounds, setMaxRounds] = useState(8);
-  const [isRegenerating, setIsRegenerating] = useState(false);
+
 
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logStats, setLogStats] = useState<LogStats>({ total: 0, substantive: 0, cosmetic: 0, deltaRejected: 0 });
@@ -80,6 +80,17 @@ export default function AdminPage() {
   const [toastMsg, setToastMsg] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  // ── Template Management ──
+  const [templates, setTemplates] = useState<Array<{ id: string; name: string; description: string; config: string; createdAt: string }>>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [saveDesc, setSaveDesc] = useState("");
+
+  // ── Live Preview ──
+  const [previewData, setPreviewData] = useState<any>(null);
+  const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
 
   // ── Load prompts ──
   useEffect(() => {
@@ -112,6 +123,16 @@ export default function AdminPage() {
       .catch((e) => console.error("Load logs error:", e));
   }, []);
 
+  // ── Load templates ──
+  useEffect(() => {
+    fetch("/api/admin/templates")
+      .then((r) => r.json())
+      .then((data) => {
+        setTemplates(Array.isArray(data) ? data : []);
+      })
+      .catch((e) => console.error("Load templates error:", e));
+  }, []);
+
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
     setToastVisible(true);
@@ -139,12 +160,135 @@ export default function AdminPage() {
     }
   };
 
-  const handleRegenerate = () => {
-    setIsRegenerating(true);
-    setTimeout(() => {
-      setIsRegenerating(false);
-      showToast("预览已更新（模拟）");
-    }, 1800);
+  // ── Template helpers ──
+  const currentConfig = () => ({
+    model,
+    temperature,
+    targetDimensions,
+    maxRounds,
+    prompts: {
+      extract_tags: tagPrompt,
+      generate_intro: introPrompt,
+      generate_image: imagePrompt,
+      interview_guide: interviewPrompt,
+    },
+  });
+
+  const loadTemplate = async (id: string) => {
+    if (!id) return;
+    try {
+      const res = await fetch(`/api/admin/templates/${id}`);
+      if (!res.ok) throw new Error("Load failed");
+      const template = await res.json();
+      const cfg = JSON.parse(template.config);
+      if (cfg.model) setModel(cfg.model);
+      if (cfg.temperature !== undefined) setTemperature(cfg.temperature);
+      if (cfg.targetDimensions) setTargetDimensions(cfg.targetDimensions);
+      if (cfg.maxRounds) setMaxRounds(cfg.maxRounds);
+      if (cfg.prompts?.extract_tags) setTagPrompt(cfg.prompts.extract_tags);
+      if (cfg.prompts?.generate_intro) setIntroPrompt(cfg.prompts.generate_intro);
+      if (cfg.prompts?.generate_image) setImagePrompt(cfg.prompts.generate_image);
+      if (cfg.prompts?.interview_guide) setInterviewPrompt(cfg.prompts.interview_guide);
+      setSelectedTemplateId(id);
+      showToast(`已加载模板：${template.name}`);
+    } catch {
+      showToast("加载模板失败");
+    }
+  };
+
+  const saveAsTemplate = async () => {
+    if (!saveName.trim()) {
+      showToast("请输入模板名称");
+      return;
+    }
+    try {
+      const res = await fetch("/api/admin/templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: saveName.trim(),
+          description: saveDesc.trim(),
+          config: currentConfig(),
+        }),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      const newTemplate = await res.json();
+      setTemplates((prev) => [newTemplate, ...prev]);
+      setShowSaveDialog(false);
+      setSaveName("");
+      setSaveDesc("");
+      showToast("模板已保存到云端");
+    } catch {
+      showToast("保存模板失败");
+    }
+  };
+
+  const deleteTemplate = async (id: string) => {
+    if (!confirm("确定删除此模板？")) return;
+    try {
+      await fetch(`/api/admin/templates/${id}`, { method: "DELETE" });
+      setTemplates((prev) => prev.filter((t) => t.id !== id));
+      if (selectedTemplateId === id) setSelectedTemplateId("");
+      showToast("模板已删除");
+    } catch {
+      showToast("删除失败");
+    }
+  };
+
+  const exportToLocal = () => {
+    const blob = new Blob([JSON.stringify(currentConfig(), null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `prompt-template-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast("已导出到本地");
+  };
+
+  const importFromLocal = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const cfg = JSON.parse(e.target?.result as string);
+        if (cfg.model) setModel(cfg.model);
+        if (cfg.temperature !== undefined) setTemperature(cfg.temperature);
+        if (cfg.targetDimensions) setTargetDimensions(cfg.targetDimensions);
+        if (cfg.maxRounds) setMaxRounds(cfg.maxRounds);
+        if (cfg.prompts?.extract_tags) setTagPrompt(cfg.prompts.extract_tags);
+        if (cfg.prompts?.generate_intro) setIntroPrompt(cfg.prompts.generate_intro);
+        if (cfg.prompts?.generate_image) setImagePrompt(cfg.prompts.generate_image);
+        if (cfg.prompts?.interview_guide) setInterviewPrompt(cfg.prompts.interview_guide);
+        setSelectedTemplateId("");
+        showToast("本地配置已加载");
+      } catch {
+        showToast("文件解析失败，请检查 JSON 格式");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // ── Real AI Preview ──
+  const handleRegenerate = async () => {
+    setIsGeneratingPreview(true);
+    try {
+      const res = await fetch("/api/ai/extract-tags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "我叫张明远，2006年从实验中学高三3班毕业。后来上了清华计算机系，一直在互联网行业，做过产品、带过团队。去年开始自己创业，做企业AI知识管理。平时喜欢独立音乐，周末经常回海淀喝咖啡。",
+          userId: "test-user-001",
+        }),
+      });
+      if (!res.ok) throw new Error("API error");
+      const data = await res.json();
+      setPreviewData(data);
+      showToast("预览已更新");
+    } catch {
+      showToast("预览生成失败");
+    } finally {
+      setIsGeneratingPreview(false);
+    }
   };
 
   const getTagColor = (type: string | null) => {
@@ -201,37 +345,47 @@ export default function AdminPage() {
                 <div className="font-serif text-[20px] font-semibold text-text-heading tracking-[0.01em] text-center mb-0.5">张明远</div>
                 <div className="text-[13px] text-text-secondary text-center mb-5">2006 届 · 高三（3）班</div>
 
+                {/* AI Generated Intro */}
                 <p className="text-sm leading-[1.65] text-text-primary mb-3.5">
-                  前大厂产品负责人，现 AI 创业者。2006 年从实验中学毕业后，进入清华计算机系，之后在互联网行业深耕 15 年。
+                  {previewData?.intro || "前大厂产品负责人，现 AI 创业者。2006 年从实验中学毕业后，进入清华计算机系，之后在互联网行业深耕 15 年。"}
                 </p>
 
-                <div className="bg-accent-bg border border-dashed border-accent rounded-md p-2.5 text-sm leading-[1.65] text-text-primary mb-3.5">
-                  目前正在寻找技术合伙人，也希望能与校友们交流 AI 创业心得。
-                </div>
+                {/* AI Generated Delta Intro */}
+                {previewData?.delta_intro && (
+                  <div className="bg-accent-bg border border-dashed border-accent rounded-md p-2.5 text-sm leading-[1.65] text-text-primary mb-3.5">
+                    {previewData.delta_intro}
+                  </div>
+                )}
 
+                {/* Tags */}
                 <div className="flex flex-wrap gap-1.5 mb-4">
-                  <span className="tag text-[11px] tag--belong py-0.5 px-2">实验中学 2006</span>
-                  <span className="tag text-[11px] tag--belong py-0.5 px-2">清华计算机系</span>
-                  <span className="tag text-[11px] tag--offer py-0.5 px-2">AI 创业</span>
-                  <span className="tag text-[11px] tag--offer py-0.5 px-2">产品设计</span>
-                  <span className="tag text-[11px] tag--follow py-0.5 px-2">独立音乐</span>
-                  <span className="tag text-[11px] tag--delta py-0.5 px-2">寻找技术合伙人</span>
-                  <span className="tag text-[11px] tag--need py-0.5 px-2">天使投资</span>
+                  {(previewData?.tags || [
+                    { name: "实验中学 2006", type: "belong" },
+                    { name: "清华计算机系", type: "belong" },
+                    { name: "AI 创业", type: "offer" },
+                    { name: "产品设计", type: "offer" },
+                    { name: "独立音乐", type: "follow" },
+                    { name: "寻找技术合伙人", type: "delta" },
+                    { name: "天使投资", type: "need" },
+                  ]).map((tag: any, i: number) => (
+                    <span key={i} className={`tag text-[11px] tag--${tag.type || "belong"} py-0.5 px-2`}>{tag.name || tag}</span>
+                  ))}
                 </div>
 
+                {/* Content Blocks */}
                 <div className="flex flex-col gap-2">
-                  {[
-                    { cat: "self_intro", label: "自我介绍", text: "AI 创业者，前大厂产品负责人，2006 年从实验中学毕业。" },
-                    { cat: "background", label: "历史背景", text: "清华计算机系毕业，15 年互联网行业经验，字节跳动、美团。" },
-                    { cat: "offer", label: "能提供的", text: "AI 产品设计咨询、创业经验分享、技术团队管理经验。" },
-                    { cat: "need", label: "具体需求", text: "寻找技术合伙人（后端/算法），天使轮融资机会。" },
-                  ].map((b) => (
-                    <div key={b.cat} className="relative bg-surface border border-border rounded-md py-2.5 px-3 pl-4 shadow-sm">
+                  {(previewData?.content_blocks || [
+                    { category: "self_intro", label: "自我介绍", text: "AI 创业者，前大厂产品负责人，2006 年从实验中学毕业。" },
+                    { category: "background", label: "历史背景", text: "清华计算机系毕业，15 年互联网行业经验，字节跳动、美团。" },
+                    { category: "offer", label: "能提供的", text: "AI 产品设计咨询、创业经验分享、技术团队管理经验。" },
+                    { category: "need", label: "具体需求", text: "寻找技术合伙人（后端/算法），天使轮融资机会。" },
+                  ]).map((b: any) => (
+                    <div key={b.category || b.cat} className="relative bg-surface border border-border rounded-md py-2.5 px-3 pl-4 shadow-sm">
                       <div className="absolute left-1 top-2.5 bottom-2.5 w-0.5 rounded-[1px]"
                         style={{
                           background:
-                            b.cat === "self_intro" ? "#9B4D4D" : b.cat === "background" ? "#B8A9C9" :
-                            b.cat === "offer" ? "#A8BF9A" : "#C9A882"
+                            (b.category || b.cat) === "self_intro" ? "#9B4D4D" : (b.category || b.cat) === "background" ? "#B8A9C9" :
+                            (b.category || b.cat) === "offer" ? "#A8BF9A" : "#C9A882"
                         }}
                       />
                       <div className="flex items-center justify-between mb-1">
@@ -251,17 +405,70 @@ export default function AdminPage() {
         <div className="flex-1 min-w-[360px] overflow-y-auto bg-surface">
           <div className="sticky top-0 z-sticky bg-surface border-b border-border-light px-5 py-4 flex items-center justify-between">
             <span className="font-serif text-h2 text-brand-dark tracking-[0.02em]">AI Lab / 效果调优</span>
-            <button className="btn-primary gap-1.5" onClick={handleRegenerate} disabled={isRegenerating}>
+            <button className="btn-primary gap-1.5" onClick={handleRegenerate} disabled={isGeneratingPreview}>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                 <path d="M2 8a6 6 0 0 1 10.472-4M14 8a6 6 0 0 1-10.472 4"/><polyline points="14 2 14 8 8 8"/>
               </svg>
-              {isRegenerating ? "正在生成..." : "重新生成预览"}
+              {isGeneratingPreview ? "正在生成..." : "重新生成预览"}
             </button>
           </div>
 
           <div className="px-5 pb-10 pt-0">
-            {/* Model & Config */}
+            {/* Template Management */}
             <section className="mb-8 mt-6">
+              <div className="text-h2 text-text-primary mb-0.5">模板管理</div>
+              <div className="text-[13px] text-text-secondary mb-4">保存、加载或分享 Prompt 配置</div>
+
+              <div className="flex flex-wrap gap-2 mb-3">
+                <select
+                  className="flex-1 min-w-[200px] border border-border rounded-sm px-3 py-2 text-sm bg-surface cursor-pointer appearance-none focus:outline-none focus:border-brand-dark"
+                  style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 5L6 8L9 5' stroke='%23546E7A' stroke-width='1.5'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 10px center", paddingRight: "32px" }}
+                  value={selectedTemplateId}
+                  onChange={(e) => loadTemplate(e.target.value)}
+                >
+                  <option value="">选择云端模板...</option>
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}{t.description ? ` — ${t.description}` : ""}</option>
+                  ))}
+                </select>
+                {selectedTemplateId && (
+                  <button className="btn-secondary text-xs px-3 py-2" onClick={() => deleteTemplate(selectedTemplateId)}>删除</button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button className="btn-primary text-xs px-3 py-2" onClick={() => setShowSaveDialog(true)}>保存为模板</button>
+                <button className="btn-secondary text-xs px-3 py-2" onClick={exportToLocal}>导出到本地</button>
+                <label className="btn-secondary text-xs px-3 py-2 cursor-pointer">
+                  从本地导入
+                  <input type="file" accept=".json" className="hidden" onChange={(e) => { if (e.target.files?.[0]) importFromLocal(e.target.files[0]); e.target.value = ""; }} />
+                </label>
+              </div>
+
+              {/* Save Dialog */}
+              {showSaveDialog && (
+                <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+                  <div className="bg-surface rounded-md shadow-xl p-6 w-full max-w-[400px] mx-4">
+                    <div className="font-serif text-lg font-semibold text-brand-dark mb-4">保存模板</div>
+                    <div className="mb-3">
+                      <label className="block text-sm font-medium text-text-primary mb-1">名称</label>
+                      <input className="w-full border border-border rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-brand-dark" value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="例如：保守版标签提取" />
+                    </div>
+                    <div className="mb-5">
+                      <label className="block text-sm font-medium text-text-primary mb-1">描述（可选）</label>
+                      <input className="w-full border border-border rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-brand-dark" value={saveDesc} onChange={(e) => setSaveDesc(e.target.value)} placeholder="简述此模板的用途或特点" />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button className="btn-secondary text-sm px-4 py-2" onClick={() => setShowSaveDialog(false)}>取消</button>
+                      <button className="btn-primary text-sm px-4 py-2" onClick={saveAsTemplate}>保存</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </section>
+
+            {/* Model & Config */}
+            <section className="mb-8">
               <div className="text-h2 text-text-primary mb-0.5">模型与配置</div>
               <div className="text-[13px] text-text-secondary mb-4">控制 AI 生成使用的底层模型和全局策略</div>
 
