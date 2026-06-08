@@ -52,6 +52,9 @@ export default function InterviewPage() {
   const [showSummary, setShowSummary] = useState(false);
   const [showSwitchModal, setShowSwitchModal] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [showDraftBanner, setShowDraftBanner] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [sseFailed, setSseFailed] = useState(false);
 
   // Live preview state
   const [previewTags, setPreviewTags] = useState<PreviewTag[]>([]);
@@ -70,10 +73,68 @@ export default function InterviewPage() {
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
+  // ── Draft auto-save ──
+  const DRAFT_KEY = "draft:interview";
+
+  useEffect(() => {
+    if (messages.length > 1 || previewTags.length > 0 || previewBlocks.length > 0 || previewIntro) {
+      const draft = {
+        messages,
+        previewTags,
+        previewBlocks,
+        previewIntro,
+        dimensionsCovered,
+      };
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    }
+  }, [messages, previewTags, previewBlocks, previewIntro, dimensionsCovered]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem(DRAFT_KEY);
+    if (saved) {
+      try {
+        const draft = JSON.parse(saved);
+        if (draft.messages && draft.messages.length > 1) {
+          setMessages(draft.messages);
+          setPreviewTags(draft.previewTags || []);
+          setPreviewBlocks(draft.previewBlocks || []);
+          setPreviewIntro(draft.previewIntro || "");
+          setDimensionsCovered(draft.dimensionsCovered || 0);
+          setShowDraftBanner(true);
+        }
+      } catch {
+        localStorage.removeItem(DRAFT_KEY);
+      }
+    }
+  }, []);
+
+  const clearDraft = useCallback(() => {
+    localStorage.removeItem(DRAFT_KEY);
+    setShowDraftBanner(false);
+  }, []);
+
+  const handleResetDraft = useCallback(() => {
+    clearDraft();
+    setMessages([
+      {
+        id: "1",
+        type: "ai",
+        category: "self_intro",
+        content: "你好！我是你的 AI 采访助手。让我们先从最简单的开始——请简单介绍一下你自己，比如你的姓名、毕业班级，以及现在在做什么？",
+      },
+    ]);
+    setPreviewTags([]);
+    setPreviewBlocks([]);
+    setPreviewIntro("");
+    setDimensionsCovered(0);
+    setInputText("");
+  }, [clearDraft]);
+
   // ── Call real AI interview SSE ──
-  const callAIInterview = useCallback(async (conversationMessages: Message[]) => {
+  const callAIInterview = useCallback(async (conversationMessages: Message[], retryCount = 0) => {
     setIsTyping(true);
     setErrorMsg("");
+    setSseFailed(false);
 
     try {
       const res = await fetch("/api/ai/interview", {
@@ -116,6 +177,7 @@ export default function InterviewPage() {
       }
 
       setIsTyping(false);
+      setIsReconnecting(false);
 
       // Infer category from content
       let category: Message["category"] = undefined;
@@ -139,17 +201,32 @@ export default function InterviewPage() {
     } catch (err: any) {
       console.error("Interview SSE error:", err);
       setIsTyping(false);
-      setErrorMsg(err.message || "AI 响应失败，请重试");
 
-      // Fallback mock response
-      const aiMsg: Message = {
-        id: Date.now().toString(),
-        type: "ai",
-        category: "need",
-        content: "了解！最后一个维度——你目前在寻找什么？无论是工作机会、合作伙伴，还是其他校友能帮上忙的事情，都可以说说。",
-      };
-      setMessages((prev) => [...prev, aiMsg]);
+      // Auto-retry up to 3 times with 2s interval
+      if (retryCount < 3) {
+        setIsReconnecting(true);
+        setErrorMsg("正在重新连接…");
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        setIsReconnecting(false);
+        return callAIInterview(conversationMessages, retryCount + 1);
+      }
+
+      // All retries exhausted
+      setSseFailed(true);
+      setErrorMsg("连接中断，无法继续对话");
     }
+  }, []);
+
+  const handleRetryConnection = useCallback(() => {
+    setSseFailed(false);
+    setErrorMsg("");
+    // Retry with the last user message context
+    callAIInterview(messages, 0);
+  }, [messages, callAIInterview]);
+
+  const handleSaveAndContinueLater = useCallback(() => {
+    // Draft is already auto-saved in localStorage
+    window.location.href = `/profile/${USER_ID}`;
   }, []);
 
   // ── Analyze conversation and update preview ──
@@ -215,9 +292,11 @@ export default function InterviewPage() {
     setShowSummary(true);
   };
 
-  const goToReview = () => {
+  const handleConfirmSummary = () => {
+    clearDraft();
     window.location.href = "/create/quick";
   };
+
 
   return (
     <main className="overflow-hidden h-[calc(100vh-56px)]">
@@ -252,6 +331,19 @@ export default function InterviewPage() {
             </button>
           </div>
 
+          {/* Draft restore banner */}
+          {showDraftBanner && (
+            <div className="mx-4 mb-2 px-3 py-2 bg-accent-surface border border-dashed border-accent rounded-md text-xs text-accent flex items-center justify-between">
+              <span>你有未完成的采访，已自动恢复</span>
+              <button
+                onClick={handleResetDraft}
+                className="bg-transparent border-none text-accent cursor-pointer text-xs font-semibold hover:underline"
+              >
+                从头开始
+              </button>
+            </div>
+          )}
+
           {/* Switch to Quick Create */}
           <div className="px-5 mb-2">
             <button
@@ -262,10 +354,35 @@ export default function InterviewPage() {
             </button>
           </div>
 
-          {/* Error */}
+          {/* Error / Reconnecting */}
           {errorMsg && (
-            <div className="mx-4 mb-2 px-3 py-2 bg-error-surface border border-error rounded-md text-xs text-error">
-              {errorMsg}
+            <div className={`mx-4 mb-2 px-3 py-2 rounded-md text-xs flex items-center justify-between ${
+              isReconnecting
+                ? "bg-accent-surface border border-accent text-accent"
+                : "bg-error-surface border border-error text-error"
+            }`}>
+              <span className="flex items-center gap-2">
+                {isReconnecting && (
+                  <span className="inline-block w-3 h-3 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+                )}
+                {errorMsg}
+              </span>
+              {sseFailed && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleRetryConnection}
+                    className="bg-transparent border-none text-error cursor-pointer text-xs font-semibold hover:underline"
+                  >
+                    重试连接
+                  </button>
+                  <button
+                    onClick={handleSaveAndContinueLater}
+                    className="bg-transparent border-none text-error cursor-pointer text-xs font-semibold hover:underline"
+                  >
+                    保存并稍后继续
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -437,7 +554,7 @@ export default function InterviewPage() {
 
             <div className="flex gap-3 justify-end pt-4 border-t border-border-light">
               <button className="btn-delta--reject text-sm py-2 px-5" onClick={() => setShowSummary(false)}>继续修改</button>
-              <button className="btn-primary text-sm" onClick={goToReview}>确认并继续</button>
+              <button className="btn-primary text-sm" onClick={handleConfirmSummary}>确认并继续</button>
             </div>
           </div>
         </>
@@ -454,7 +571,21 @@ export default function InterviewPage() {
             </p>
             <div className="flex gap-3 justify-center">
               <button className="btn-delta--reject text-sm py-2 px-5" onClick={() => setShowSwitchModal(false)}>继续采访</button>
-              <Link href="/create/quick" className="btn-primary text-sm">切换到快速创建</Link>
+              <Link
+                href="/create/quick"
+                className="btn-primary text-sm"
+                onClick={() => {
+                  // Pass preview data to quick create
+                  localStorage.setItem("draft:interview-to-quick", JSON.stringify({
+                    previewTags,
+                    previewBlocks,
+                    previewIntro,
+                    dimensionsCovered,
+                  }));
+                }}
+              >
+                切换到快速创建
+              </Link>
             </div>
           </div>
         </>

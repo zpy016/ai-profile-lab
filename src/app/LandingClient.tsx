@@ -53,26 +53,6 @@ export default function LandingClient() {
           </p>
         </div>
 
-        {/* State Demo Selector (dev only) */}
-        <div className="flex gap-2 justify-center mb-6">
-          {(["active", "dirty", "draft", "empty"] as ProfileState[]).map((s) => (
-            <button
-              key={s}
-              onClick={() => setProfileState(s)}
-              className={`px-3.5 py-1.5 text-xs font-medium border rounded-sm transition-all ${
-                profileState === s
-                  ? "border-primary text-primary bg-primary-surface"
-                  : "border-border bg-surface text-text-secondary hover:border-brand-dark hover:text-text-primary"
-              }`}
-            >
-              {s === "active" && "actived状态"}
-              {s === "dirty" && "dirty 状态"}
-              {s === "draft" && "draft 状态"}
-              {s === "empty" && "empty 状态"}
-            </button>
-          ))}
-        </div>
-
         {/* CTA Cards */}
         <div className="mb-8">
           {profileState === "empty" && (

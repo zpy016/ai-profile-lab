@@ -211,10 +211,10 @@ export function signRequest(
   ].join("\n");
 
   // 5. Signing key
-  let kDate = hmacSha256(VOLC_SECRETKEY, date);
-  let kRegion = hmacSha256(kDate, VOLC_REGION);
-  let kService = hmacSha256(kRegion, service);
-  let kSigning = hmacSha256(kService, "request");
+  const kDate = hmacSha256(VOLC_SECRETKEY, date);
+  const kRegion = hmacSha256(kDate, VOLC_REGION);
+  const kService = hmacSha256(kRegion, service);
+  const kSigning = hmacSha256(kService, "request");
 
   // 6. Signature
   const signature = hmacSha256(kSigning, stringToSign).toString("hex");

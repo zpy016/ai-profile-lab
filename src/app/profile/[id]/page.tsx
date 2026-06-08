@@ -96,7 +96,7 @@ export default function ProfilePage() {
       setProfile({
         ...data,
         tags: data.tags || [],
-        blocks: (data.blocks || []).map((b: any) => ({
+        blocks: (data.blocks || []).map(b => ({
           id: b.id,
           category: b.category,
           label: CAT_NAMES[b.category] || "自定义",
@@ -107,7 +107,7 @@ export default function ProfilePage() {
       });
       setDeltaIntroVisible(!!data.aiDeltaIntro);
       setDeltaIntroAccepted(false);
-    } catch (e) {
+    } catch {
       console.error("Fetch profile error:", e);
       showToast("加载失败，请刷新重试");
     } finally {
@@ -144,7 +144,7 @@ export default function ProfilePage() {
       setDeltaIntroAccepted(true);
       await fetchProfile();
       showToast("增量内容已融入正文");
-    } catch (e) {
+    } catch {
       showToast("保存失败，请重试");
     }
   };
@@ -161,7 +161,7 @@ export default function ProfilePage() {
       setDeltaIntroVisible(false);
       await fetchProfile();
       showToast("已抹除 AI 增量内容");
-    } catch (e) {
+    } catch {
       showToast("保存失败，请重试");
     }
   };
@@ -177,7 +177,7 @@ export default function ProfilePage() {
       if (!res.ok) throw new Error("Confirm failed");
       await fetchProfile();
       showToast("标签已确认");
-    } catch (e) {
+    } catch {
       showToast("操作失败，请重试");
     }
   };
@@ -192,7 +192,7 @@ export default function ProfilePage() {
       if (!res.ok) throw new Error("Delete failed");
       await fetchProfile();
       showToast("已抹除 AI 增量标签");
-    } catch (e) {
+    } catch {
       showToast("操作失败，请重试");
     }
   };
@@ -215,7 +215,7 @@ export default function ProfilePage() {
       setEditingBlockId(null);
       await fetchProfile();
       showToast("已保存，AI 不会修改您的内容");
-    } catch (e) {
+    } catch {
       showToast("保存失败，请重试");
     }
   };
@@ -236,7 +236,7 @@ export default function ProfilePage() {
       setDeleteTargetId(null);
       await fetchProfile();
       showToast("内容块已删除");
-    } catch (e) {
+    } catch {
       showToast("删除失败，请重试");
     }
   };
@@ -260,7 +260,7 @@ export default function ProfilePage() {
       setNewBlockText("");
       await fetchProfile();
       showToast("已记录，AI 正在补充相关内容");
-    } catch (e) {
+    } catch {
       showToast("添加失败，请重试");
     }
   };
@@ -286,7 +286,7 @@ export default function ProfilePage() {
       setShowVisDrawer(false);
       await fetchProfile();
       showToast("可见性已更新");
-    } catch (e) {
+    } catch {
       showToast("更新失败，请重试");
     }
   };
@@ -312,7 +312,7 @@ export default function ProfilePage() {
         await fetchProfile();
         showToast(data.source === "placeholder" ? "图片占位已更新" : "图片已更新");
       }
-    } catch (e) {
+    } catch {
       showToast("图片生成失败");
     } finally {
       setIsGeneratingImage(false);
@@ -353,6 +353,19 @@ export default function ProfilePage() {
   return (
     <main className="py-12 pb-20">
       <div className="container--narrow">
+        {/* Draft Banner */}
+        {profile.status === "draft" && (
+          <div className="flex items-center justify-between px-4 py-2.5 bg-elevated border border-border rounded-md mb-6 text-sm text-text-primary font-medium">
+            <div className="flex items-center gap-2">
+              <span>✎</span>
+              <span>你的主页尚未发布，其他校友暂时看不到</span>
+            </div>
+            <a href="/create/quick" className="text-[13px] font-semibold text-primary hover:text-primary-hover transition-colors no-underline">
+              继续创建 →
+            </a>
+          </div>
+        )}
+
         {/* Dirty Banner */}
         {hasDelta && (
           <div className="flex items-center gap-2 px-4 py-2.5 bg-accent-surface border border-accent rounded-md mb-6 text-sm text-accent font-medium">

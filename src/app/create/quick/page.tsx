@@ -57,6 +57,39 @@ export default function QuickCreatePage() {
       setInputText(saved);
       setTimeout(autoResize, 50);
     }
+
+    // Check for interview-to-quick handoff
+    const handoff = localStorage.getItem("draft:interview-to-quick");
+    if (handoff) {
+      try {
+        const data = JSON.parse(handoff) as {
+          previewTags?: Array<{ text: string; type?: string }>;
+          previewBlocks?: Array<{ label: string; text: string; cat: string }>;
+          previewIntro?: string;
+        };
+        if (data.previewTags?.length || data.previewBlocks?.length || data.previewIntro) {
+          // Convert interview preview data to review format
+          const apiTags: ReviewTag[] = (data.previewTags || []).map((t) => ({
+            name: t.text,
+            cat: t.type || "follow",
+            delta: false,
+          }));
+          const apiBlocks: ReviewBlock[] = (data.previewBlocks || []).map((b) => ({
+            label: b.label,
+            text: b.text,
+            cat: b.cat,
+            delta: false,
+          }));
+          setTags(apiTags);
+          setBaseIntro(data.previewIntro || "");
+          setBlocks(apiBlocks);
+          setStep("review");
+          localStorage.removeItem("draft:interview-to-quick");
+        }
+      } catch {
+        localStorage.removeItem("draft:interview-to-quick");
+      }
+    }
   }, [autoResize]);
 
   // ── Call AI Extract Tags API ──
