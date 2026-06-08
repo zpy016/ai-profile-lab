@@ -64,9 +64,6 @@ jobs:
           script: |
             cd /var/www/ai-profile-lab
 
-            # 清理旧的 Next.js 构建产物，防止旧文件（如 analyze.js）与新文件（analyze/route.js）冲突
-            rm -rf .next
-
             # ── 写入环境变量（从 GitHub Secrets 注入）──
             cat > .env.local << 'ENVEOF'
             # ── 火山方舟 (Volcano Ark) 配置 ──
@@ -93,8 +90,11 @@ jobs:
 
             chmod 600 .env.local
 
-            # 安装依赖（服务器端）
-            npm ci --omit=dev 2>/dev/null || npm install --omit=dev
+            # 清理旧构建产物，防止新旧文件冲突
+            rm -rf .next
+
+            # 安装所有依赖（包含 devDependencies，服务器端构建需要 tailwindcss/postcss/typescript）
+            npm install
 
             # 生成 Prisma Client
             npx prisma generate
@@ -104,6 +104,9 @@ jobs:
 
             # 种子数据（仅首次）
             npx prisma db seed 2>/dev/null || true
+
+            # 在服务器端重新构建（SCP 的 tar 打包会排除 .gitignore 中的 .next 目录）
+            npm run build
 
             # ── 用 ecosystem.config.js 启动 PM2（env 字段直接注入环境变量）──
             cat > ecosystem.config.js << PM2EOF
