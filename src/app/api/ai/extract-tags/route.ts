@@ -98,21 +98,11 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(parsed);
       } catch (apiError: any) {
         console.error("Volcano API error:", apiError);
-        // DEBUG: return error details instead of mock fallback
-        return NextResponse.json({
-          _debug: "real-ai-failed",
-          _error: apiError?.message || String(apiError),
-          _errorType: apiError?.constructor?.name || typeof apiError,
-          _stack: apiError?.stack?.split("\n")?.slice(0, 4) || null,
-          _endpoint: getEndpointId("llm"),
-          _configured: isVolcanoConfigured(),
-          _promptLength: systemPrompt.length,
-          _inputLength: userContent.length,
-        }, { status: 200 });
+        // Fall through to mock response
       }
     }
 
-    // Mock response for POC demo (only reached when volcano not configured)
+    // Mock response for POC demo
     const mockResponse = {
       tags: [
         { text: "实验中学 2006", type: "belong" },

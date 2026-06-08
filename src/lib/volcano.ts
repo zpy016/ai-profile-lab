@@ -72,7 +72,7 @@ export async function chatCompletion(params: VolcanoChatParams): Promise<string>
       Authorization: `Bearer ${VOLC_API_KEY}`,
     },
     body,
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(90000),
   });
 
   if (!response.ok) {
