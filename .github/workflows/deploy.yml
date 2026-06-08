@@ -82,6 +82,9 @@ jobs:
             # ── 应用配置 ──
             NEXT_PUBLIC_APP_NAME="实验同学录"
             NEXT_PUBLIC_APP_SUBTITLE="2006 届校友的数字纪念册"
+
+            # ── Admin 鉴权 ──
+            ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}
             ENVEOF
 
             chmod 600 .env.local
@@ -118,6 +121,7 @@ jobs:
                   DATABASE_URL: 'file:./dev.db',
                   NEXT_PUBLIC_APP_NAME: '实验同学录',
                   NEXT_PUBLIC_APP_SUBTITLE: '2006 届校友的数字纪念册',
+                  ADMIN_PASSWORD: '${{ secrets.ADMIN_PASSWORD }}',
                 },
                 error_file: '/root/.pm2/logs/ai-profile-lab-error.log',
                 out_file: '/root/.pm2/logs/ai-profile-lab-out.log',
