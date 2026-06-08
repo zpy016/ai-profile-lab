@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
       orderBy: { version: "desc" },
     });
 
-    const systemPrompt = prompt?.content || `你是一位校友档案整理员。请从以下自我介绍中提取标签和内容块。
+    let systemPrompt = prompt?.content || `你是一位校友档案整理员。请从以下自我介绍中提取标签和内容块。
 
 标签分为四类：属于（身份归属）、提供（能给予的）、需要（需要的）、关注（兴趣爱好）。每个标签不超过8个字。
 
@@ -38,6 +38,24 @@ export async function POST(request: NextRequest) {
 判断增量更新的方法：如果输入内容明显是在已有档案基础上补充的新信息，则提取 delta；如果是完整的自我介绍，则 delta 为空。
 
 请确保 JSON 格式正确，可以被直接解析。`;
+
+    let userContent = text;
+
+    // If existingContext provided, append it to guide delta extraction
+    if (existingContext && (existingContext.tags?.length || existingContext.intro || existingContext.blocks?.length)) {
+      const ctxParts: string[] = ["\n\n【已有档案信息】"];
+      if (existingContext.intro) {
+        ctxParts.push(`简介：${existingContext.intro}`);
+      }
+      if (existingContext.tags?.length) {
+        ctxParts.push(`已有标签：${existingContext.tags.map((t: any) => t.name || t.text).join("、")}`);
+      }
+      if (existingContext.blocks?.length) {
+        ctxParts.push(`已有内容：${existingContext.blocks.map((b: any) => b.text || b.content).join("；")}`);
+      }
+      ctxParts.push("\n请基于「已有档案信息」，仅从「新增内容」中提取变化部分（delta_tags 和 delta_intro）。如果新增内容中有与已有信息重复的部分，不要重复输出。");
+      userContent = text + ctxParts.join("\n");
+    }
 
     // If Volcano is configured, use real AI
     if (isVolcanoConfigured()) {

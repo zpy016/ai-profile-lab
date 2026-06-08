@@ -127,24 +127,21 @@ export default function InterviewSandbox({ showToast }: Props) {
               if (data === "[DONE]") continue;
               try {
                 const parsed = JSON.parse(data);
-                if (parsed.content) {
-                  aiContent += parsed.content;
+                const content = parsed.choices?.[0]?.delta?.content || "";
+                if (content) {
+                  aiContent += content;
                   setMessages((prev) =>
                     prev.map((m) => (m.id === aiMsgId ? { ...m, content: aiContent } : m))
                   );
                 }
-                if (parsed.category) {
-                  aiCategory = parsed.category;
-                  setMessages((prev) =>
-                    prev.map((m) => (m.id === aiMsgId ? { ...m, category: aiCategory } : m))
-                  );
-                }
               } catch {
                 // non-JSON data, treat as plain text
-                aiContent += data;
-                setMessages((prev) =>
-                  prev.map((m) => (m.id === aiMsgId ? { ...m, content: aiContent } : m))
-                );
+                if (data && data !== "[DONE]") {
+                  aiContent += data;
+                  setMessages((prev) =>
+                    prev.map((m) => (m.id === aiMsgId ? { ...m, content: aiContent } : m))
+                  );
+                }
               }
             }
           }
