@@ -6,6 +6,9 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  env: {
+    ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || "",
+  },
 };
 
 export default nextConfig;
