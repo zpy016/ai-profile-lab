@@ -64,6 +64,9 @@ jobs:
           script: |
             cd /var/www/ai-profile-lab
 
+            # 清理旧的 Next.js 构建产物，防止旧文件（如 analyze.js）与新文件（analyze/route.js）冲突
+            rm -rf .next
+
             # ── 写入环境变量（从 GitHub Secrets 注入）──
             cat > .env.local << 'ENVEOF'
             # ── 火山方舟 (Volcano Ark) 配置 ──
