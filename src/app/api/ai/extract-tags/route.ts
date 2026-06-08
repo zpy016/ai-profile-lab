@@ -5,7 +5,7 @@ import prisma from "@/lib/prisma";
 
 export async function POST(request: NextRequest) {
   try {
-    const { text, userId } = await request.json();
+    const { text, userId, existingContext } = await request.json();
 
     if (!text?.trim()) {
       return NextResponse.json({ error: "Text is required" }, { status: 400 });
@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
           endpointId,
           messages: [
             { role: "system", content: systemPrompt },
-            { role: "user", content: text },
+            { role: "user", content: userContent },
           ],
           temperature: 0.7,
         });

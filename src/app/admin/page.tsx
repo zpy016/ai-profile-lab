@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import QuickSandbox from "./components/QuickSandbox";
+import InterviewSandbox from "./components/InterviewSandbox";
+import DeltaSandbox from "./components/DeltaSandbox";
 
 interface PromptData {
   id: string;
@@ -57,6 +60,14 @@ Use elements that reflect the person's identity, profession and background. Soft
 const IMAGE_LOCKED_PREFIX =
   "abstract composition, muted morandi palette, no human face, no text, digital yearbook aesthetic, subtle geometric forms, warm nostalgic atmosphere, 16:9 aspect ratio";
 
+type Scene = "quick" | "interview" | "delta";
+
+const SCENE_LABELS: Record<Scene, string> = {
+  quick: "快速录入",
+  interview: "采访式",
+  delta: "增量更新",
+};
+
 export default function AdminPage() {
   const [model, setModel] = useState("ep-20260608013645-vmmr2");
   const [temperature, setTemperature] = useState(0.7);
@@ -71,7 +82,6 @@ export default function AdminPage() {
   const [targetDimensions, setTargetDimensions] = useState(4);
   const [maxRounds, setMaxRounds] = useState(8);
 
-
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logStats, setLogStats] = useState<LogStats>({ total: 0, substantive: 0, cosmetic: 0, deltaRejected: 0 });
   const [logsLoaded, setLogsLoaded] = useState(false);
@@ -81,16 +91,15 @@ export default function AdminPage() {
   const [toastVisible, setToastVisible] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>();
 
+  // ── Scene ──
+  const [activeScene, setActiveScene] = useState<Scene>("quick");
+
   // ── Template Management ──
   const [templates, setTemplates] = useState<Array<{ id: string; name: string; description: string; config: string; createdAt: string }>>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveName, setSaveName] = useState("");
   const [saveDesc, setSaveDesc] = useState("");
-
-  // ── Live Preview ──
-  const [previewData, setPreviewData] = useState<any>(null);
-  const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
 
   // ── Load prompts ──
   useEffect(() => {
@@ -153,7 +162,7 @@ export default function AdminPage() {
       const data = await res.json();
       setPrompts((prev) => ({ ...prev, [key]: data }));
       showToast("Prompt 已保存");
-    } catch (e) {
+    } catch {
       showToast("保存失败，请重试");
     } finally {
       setSavingPrompt(null);
@@ -268,29 +277,6 @@ export default function AdminPage() {
     reader.readAsText(file);
   };
 
-  // ── Real AI Preview ──
-  const handleRegenerate = async () => {
-    setIsGeneratingPreview(true);
-    try {
-      const res = await fetch("/api/ai/extract-tags", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: "我叫张明远，2006年从实验中学高三3班毕业。后来上了清华计算机系，一直在互联网行业，做过产品、带过团队。去年开始自己创业，做企业AI知识管理。平时喜欢独立音乐，周末经常回海淀喝咖啡。",
-          userId: "test-user-001",
-        }),
-      });
-      if (!res.ok) throw new Error("API error");
-      const data = await res.json();
-      setPreviewData(data);
-      showToast("预览已更新");
-    } catch {
-      showToast("预览生成失败");
-    } finally {
-      setIsGeneratingPreview(false);
-    }
-  };
-
   const getTagColor = (type: string | null) => {
     switch (type) {
       case "substantive": return { bg: "bg-primary-surface", color: "text-primary" };
@@ -317,87 +303,35 @@ export default function AdminPage() {
   return (
     <main className="overflow-hidden h-[calc(100vh-56px)]">
       <div className="flex h-full">
-        {/* LEFT: Preview Panel (55%) */}
-        <div className="w-[55%] min-w-[480px] border-r border-border-light overflow-y-auto bg-bg flex flex-col">
-          <div className="flex items-center justify-between px-5 py-2.5 bg-surface border-b border-border-light sticky top-0 z-sticky flex-shrink-0">
-            <div className="flex items-center gap-1.5 text-xs font-medium text-text-secondary">
-              <span className="w-1.5 h-1.5 rounded-full bg-accent-green" />
-              用户视角预览（只读）
+        {/* LEFT: Sandbox Panel (55%) */}
+        <div className="w-[55%] min-w-[480px] border-r border-border-light overflow-hidden bg-bg flex flex-col">
+          {/* Scene Tabs */}
+          <div className="flex items-center justify-between px-5 py-2.5 bg-surface border-b border-border-light flex-shrink-0">
+            <div className="flex items-center gap-1">
+              {(Object.keys(SCENE_LABELS) as Scene[]).map((scene) => (
+                <button
+                  key={scene}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-sm transition-colors ${
+                    activeScene === scene
+                      ? "bg-brand-dark text-white"
+                      : "text-text-secondary hover:text-text-primary hover:bg-elevated"
+                  }`}
+                  onClick={() => setActiveScene(scene)}
+                >
+                  {SCENE_LABELS[scene]}
+                </button>
+              ))}
             </div>
-            <div className="text-xs font-medium text-text-placeholder">
-              当前用户：<strong className="text-text-primary font-semibold">张明远</strong>（测试账号）
+            <div className="text-xs text-text-placeholder">
+              沙盒模式 · 操作不写入数据库
             </div>
           </div>
 
-          <div className="flex items-start justify-center p-8 pb-16 flex-1">
-            <div className="w-full max-w-[480px] bg-surface rounded-md shadow-lg overflow-hidden origin-top scale-[0.92]">
-              {/* Preview Card Image */}
-              <div className="w-full aspect-[16/9] relative" style={{
-                background: "linear-gradient(135deg, #E8D5C4 0%, #C49A6C 25%, #9B4D4D 50%, #4A6670 75%, #2C3E50 100%)"
-              }}>
-                <div className="absolute bottom-0 left-0 right-0 bg-white/85 backdrop-blur-[4px] px-3 py-1.5 flex items-center justify-between text-[10px] text-text-secondary z-[1]">
-                  <span>内容已更新，图片可能需要刷新</span>
-                  <span className="text-[10px] font-medium text-accent border border-accent rounded-sm px-2 py-0.5 bg-transparent cursor-pointer">更新图片</span>
-                </div>
-              </div>
-              {/* Preview Card Body */}
-              <div className="p-5">
-                <div className="font-serif text-[20px] font-semibold text-text-heading tracking-[0.01em] text-center mb-0.5">张明远</div>
-                <div className="text-[13px] text-text-secondary text-center mb-5">2006 届 · 高三（3）班</div>
-
-                {/* AI Generated Intro */}
-                <p className="text-sm leading-[1.65] text-text-primary mb-3.5">
-                  {previewData?.intro || "前大厂产品负责人，现 AI 创业者。2006 年从实验中学毕业后，进入清华计算机系，之后在互联网行业深耕 15 年。"}
-                </p>
-
-                {/* AI Generated Delta Intro */}
-                {previewData?.delta_intro && (
-                  <div className="bg-accent-bg border border-dashed border-accent rounded-md p-2.5 text-sm leading-[1.65] text-text-primary mb-3.5">
-                    {previewData.delta_intro}
-                  </div>
-                )}
-
-                {/* Tags */}
-                <div className="flex flex-wrap gap-1.5 mb-4">
-                  {(previewData?.tags || [
-                    { name: "实验中学 2006", type: "belong" },
-                    { name: "清华计算机系", type: "belong" },
-                    { name: "AI 创业", type: "offer" },
-                    { name: "产品设计", type: "offer" },
-                    { name: "独立音乐", type: "follow" },
-                    { name: "寻找技术合伙人", type: "delta" },
-                    { name: "天使投资", type: "need" },
-                  ]).map((tag: any, i: number) => (
-                    <span key={i} className={`tag text-[11px] tag--${tag.type || "belong"} py-0.5 px-2`}>{tag.name || tag}</span>
-                  ))}
-                </div>
-
-                {/* Content Blocks */}
-                <div className="flex flex-col gap-2">
-                  {(previewData?.content_blocks || [
-                    { category: "self_intro", label: "自我介绍", text: "AI 创业者，前大厂产品负责人，2006 年从实验中学毕业。" },
-                    { category: "background", label: "历史背景", text: "清华计算机系毕业，15 年互联网行业经验，字节跳动、美团。" },
-                    { category: "offer", label: "能提供的", text: "AI 产品设计咨询、创业经验分享、技术团队管理经验。" },
-                    { category: "need", label: "具体需求", text: "寻找技术合伙人（后端/算法），天使轮融资机会。" },
-                  ]).map((b: any) => (
-                    <div key={b.category || b.cat} className="relative bg-surface border border-border rounded-md py-2.5 px-3 pl-4 shadow-sm">
-                      <div className="absolute left-1 top-2.5 bottom-2.5 w-0.5 rounded-[1px]"
-                        style={{
-                          background:
-                            (b.category || b.cat) === "self_intro" ? "#9B4D4D" : (b.category || b.cat) === "background" ? "#B8A9C9" :
-                            (b.category || b.cat) === "offer" ? "#A8BF9A" : "#C9A882"
-                        }}
-                      />
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[11px] font-semibold text-text-primary">{b.label}</span>
-                        <span className="text-[9px] font-medium text-accent rounded-[2px] px-1 py-px" style={{ background: "rgba(196,154,108,0.12)" }}>AI</span>
-                      </div>
-                      <p className="text-xs leading-relaxed text-text-primary">{b.text}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+          {/* Scene Content */}
+          <div className="flex-1 overflow-hidden">
+            {activeScene === "quick" && <QuickSandbox showToast={showToast} />}
+            {activeScene === "interview" && <InterviewSandbox showToast={showToast} />}
+            {activeScene === "delta" && <DeltaSandbox showToast={showToast} />}
           </div>
         </div>
 
@@ -405,12 +339,7 @@ export default function AdminPage() {
         <div className="flex-1 min-w-[360px] overflow-y-auto bg-surface">
           <div className="sticky top-0 z-sticky bg-surface border-b border-border-light px-5 py-4 flex items-center justify-between">
             <span className="font-serif text-h2 text-brand-dark tracking-[0.02em]">AI Lab / 效果调优</span>
-            <button className="btn-primary gap-1.5" onClick={handleRegenerate} disabled={isGeneratingPreview}>
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <path d="M2 8a6 6 0 0 1 10.472-4M14 8a6 6 0 0 1-10.472 4"/><polyline points="14 2 14 8 8 8"/>
-              </svg>
-              {isGeneratingPreview ? "正在生成..." : "重新生成预览"}
-            </button>
+            <div className="text-xs text-text-placeholder">当前场景：{SCENE_LABELS[activeScene]}</div>
           </div>
 
           <div className="px-5 pb-10 pt-0">
