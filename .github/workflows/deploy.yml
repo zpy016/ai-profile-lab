@@ -40,6 +40,7 @@ jobs:
           VOLC_SECRETKEY: ${{ secrets.VOLC_SECRETKEY }}
           VOLC_REGION: cn-beijing
           DATABASE_URL: "file:./dev.db"
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
         run: npm run build
 
       # 6. 通过 SCP 上传整个项目目录到服务器
