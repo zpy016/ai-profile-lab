@@ -33,12 +33,6 @@ const INITIAL_MESSAGES: Message[] = [
     type: "user",
     content: "我后来去了清华计算机系，毕业后在互联网行业待了 15 年，字节和美团都待过，一直做产品方向。",
   },
-  {
-    id: "5",
-    type: "ai",
-    category: "offer",
-    content: "既然有这么多年的产品经验，你觉得可以为其他校友提供哪些帮助呢？",
-  },
 ];
 
 const CATEGORY_LABELS: Record<string, string> = {

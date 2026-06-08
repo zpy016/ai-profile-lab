@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef } from "react";
 
 export default function AdminPage() {
-  const [model, setModel] = useState("doubao-pro-32k");
+  const [model, setModel] = useState("deepseek-v4-pro");
   const [temperature, setTemperature] = useState(0.7);
   const [tagPrompt, setTagPrompt] = useState(
     `你是一位校友档案整理员。请从以下自我介绍中提取标签，每个标签不超过8个字。标签分为四类：属于（身份归属）、提供（能给予的）、需要（需要的）、关注（兴趣爱好）。输出JSON格式。`
@@ -149,8 +149,9 @@ export default function AdminPage() {
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
                 >
-                  <option value="doubao-pro-32k">Doubao Pro 32K (推荐)</option>
-                  <option value="doubao-pro-4k">Doubao Pro 4K</option>
+                  <option value="deepseek-v4-pro">DeepSeek-V4-pro（当前使用）</option>
+                  <option value="deepseek-v4-lite">DeepSeek-V4-lite（快速）</option>
+                  <option value="doubao-pro-32k">Doubao Pro 32K</option>
                   <option value="doubao-lite">Doubao Lite</option>
                 </select>
               </div>
